@@ -1,8 +1,7 @@
 # Feasibility spike: running the MV game on QuickJS + GLES
 
-Measured on the clean Steam build (RPG Maker MV, PIXI 4.5.4), QuickJS-ng 0.17.0, x86 desktop.
-Nothing here is an on-device number: the Switch's A57 cores are several times slower than the
-desktop that produced the timings below, so treat times as relative, and heap sizes as real.
+Measured on the clean Steam build (RPG Maker MV, PIXI 4.5.4), QuickJS-ng 0.17.0. Sections 1-5
+are x86 desktop numbers; section 7 has the same scripts run on a Switch Lite at stock clock.
 Scripts: `spike/load_mv.js`, `spike/pixi_bench.js`, `spike/parse_db.js`
 (`qjs spike/<script>.js <www dir>`).
 
@@ -87,3 +86,30 @@ Measure before optimising.
 2. `Bitmap`'s canvas-2D context, `Image`, XHR, fonts: enough to reach `Scene_Boot`.
 3. Boot to the title screen and into the first map, headless first (fake GL, as in the spike).
 4. The Terrax mask on the GPU, then audio; lazy Troops only if boot time needs it.
+
+## 7. On device (Switch Lite, stock clock, handheld)
+
+Same scripts, run by `bench-nro/` (QuickJS cross-built with devkitA64, `-O2`, one thread).
+Stock clock confirmed from the status overlay during the run (CPU 100% at 1043.6 MHz).
+
+| | x86 | Lite | slowdown |
+|---|---|---|---|
+| Load all 4 MB of JS | 144 ms | 758 ms | 5.3x |
+| Parse the database (19.3 MB) | 579 ms | 2.8 s | 4.9x |
+| of which `Troops.json` | 384 ms | 1.9 s | 4.9x |
+| Parse one 2 MB map | 46 ms | 191 ms | 4.2x |
+| PIXI map frame (1314 tiles + 66 sprites) | 0.67 ms | **3.9 ms** | 5.8x |
+
+Heap sizes match the x86 run (about 143 MB for the database). Process memory available after
+hbmenu title takeover: **3189 MB**.
+
+Reading it: the engine is about **5x slower than the desktop**, not 3x. An earlier run looked
+faster because the console was overclocked (about 2.4 GHz on the overlay); the bench's own
+clock readout said 1020 MHz in both cases and is not to be trusted, so check the overlay.
+
+- PIXI rendering for a typical map costs about 4 ms of a 16.6 ms frame, so about 12 ms is left
+  at 60 fps for MV's own logic, window redraws and the native side. Tight, but a 30 fps
+  fallback has plenty of room.
+- Boot is about 3.5 s of JS work (load plus database), tolerable once, with lazy troops
+  as the available trim.
+- QuickJS scripts run on one core: the GL, audio and 2D-canvas work should go on others.
