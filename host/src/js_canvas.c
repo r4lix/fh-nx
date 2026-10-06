@@ -18,6 +18,13 @@
 #define STBTT_STATIC
 #include "imstb_truetype.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_STDIO
+#define STBI_NO_LINEAR
+#define STBI_NO_HDR
+#include "stb_image.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -1432,6 +1439,29 @@ static JSValue nx_surface_from_rgba(JSContext *ctx, JSValueConst self, int argc,
     JS_SetOpaque(o, s);
     return o;
 }
+/* decodeImage(bytes) -> {surface, width, height} or null. PNG only (what MV ships). The decoder's
+ * malloc'd RGBA buffer becomes the surface's pixel store without a copy. */
+static JSValue nx_decode_image(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    size_t len = 0;
+    const uint8_t *src = argc ? view_bytes(ctx, argv[0], &len) : NULL;
+    if (!src || len < 8 || len > 0x7fffffff) return JS_NULL;
+    int w = 0, h = 0, n = 0;
+    uint8_t *px = stbi_load_from_memory(src, (int)len, &w, &h, &n, 4);
+    if (!px) return JS_NULL;
+    Surface *s = malloc(sizeof *s);
+    s->b = malloc(sizeof(Buf));
+    s->b->px = px;
+    s->b->refs = 1;
+    s->w = w; s->h = h; s->refs = 1;
+    JSValue so = JS_NewObjectClass(ctx, surface_class);
+    JS_SetOpaque(so, s);
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "surface", so);
+    JS_SetPropertyStr(ctx, o, "width", JS_NewInt32(ctx, w));
+    JS_SetPropertyStr(ctx, o, "height", JS_NewInt32(ctx, h));
+    return o;
+}
+
 static JSValue nx_create_context(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     Surface *s = JS_GetOpaque2(ctx, argv[0], surface_class);
     if (!s) return JS_EXCEPTION;
@@ -1502,6 +1532,7 @@ void js_canvas_init(JSContext *ctx, JSValueConst nx) {
     JS_SetPropertyStr(ctx, nx, "surfaceResize", JS_NewCFunction(ctx, nx_surface_resize, "surfaceResize", 3));
     JS_SetPropertyStr(ctx, nx, "surfaceBuffer", JS_NewCFunction(ctx, nx_surface_buffer, "surfaceBuffer", 1));
     JS_SetPropertyStr(ctx, nx, "surfaceFromRGBA", JS_NewCFunction(ctx, nx_surface_from_rgba, "surfaceFromRGBA", 3));
+    JS_SetPropertyStr(ctx, nx, "decodeImage", JS_NewCFunction(ctx, nx_decode_image, "decodeImage", 1));
     JS_SetPropertyStr(ctx, nx, "createContext", JS_NewCFunction(ctx, nx_create_context, "createContext", 2));
     JS_SetPropertyStr(ctx, nx, "registerFont", JS_NewCFunction(ctx, nx_register_font, "registerFont", 2));
 }

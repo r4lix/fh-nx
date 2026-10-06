@@ -95,6 +95,28 @@
   }
   setFps("starting");
 
+  // Real game art through MV's own Bitmap + Decrypter: an encrypted title image, and the plain Window.png
+  try {
+    __loadScript("js/rpg_core.js");
+    g.$dataSystem = JSON.parse(nx.readFile(nx.root + "/data/System.json"));
+    Decrypter.hasEncryptedImages = true;
+    function showBitmap(url, x, y, w) {
+      const bmp = Bitmap.load(url);
+      bmp.addLoadListener(() => {
+        const sp = new PIXI.Sprite(new PIXI.Texture(bmp.baseTexture));
+        const k = w / bmp.width;
+        sp.scale.set(k, k);
+        sp.x = x; sp.y = y;
+        stage.addChild(sp);
+        nx.log("loaded " + url + " " + bmp.width + "x" + bmp.height);
+      });
+    }
+    showBitmap("img/titles2/title2.png", 700, 380, 540);
+    showBitmap("img/system/Window.png", 560, 40, 192);
+  } catch (e) {
+    nx.log("asset demo failed: " + e + (e && e.stack ? " | " + e.stack : ""));
+  }
+
   let frames = 0, last = nx.now();
   function loop(now) {
     for (const s of sprites) { s.x += 2; if (s.x > W) s.x = -48; }

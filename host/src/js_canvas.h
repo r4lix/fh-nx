@@ -8,6 +8,7 @@
  *   surfaceBuffer(surface)         -> ArrayBuffer over the live pixels (what texImage2D uploads)
  *   createContext(surface, canvas) -> CanvasRenderingContext2D
  *   registerFont(family, path)     -> bool
- *   surfaceFromRGBA(ab, w, h)      -> Surface (copy), for decoded images
+ *   surfaceFromRGBA(ab, w, h)      -> Surface (copy)
+ *   decodeImage(bytes)             -> {surface, width, height} | null   (PNG)
  * No libnx or GL dependency: it builds and runs on the host for testing. */
 void js_canvas_init(JSContext *ctx, JSValueConst nx);

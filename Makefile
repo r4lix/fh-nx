@@ -25,7 +25,7 @@ QJS  ?= /tmp/qjs
 FONT ?= $(CURDIR)/tests/fonts/test.ttf
 build/canvas_host: tests/canvas_host.c host/src/js_canvas.c host/src/js_canvas.h
 	@mkdir -p build
-	$(CC) -std=gnu11 -O1 -g -Wno-unused-function -Wno-unused-variable -I$(QJS) -Ithird_party/imgui tests/canvas_host.c host/src/js_canvas.c $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa.c -D_GNU_SOURCE -lm -o $@
+	$(CC) -std=gnu11 -O1 -g -Wno-unused-function -Wno-unused-variable -I$(QJS) -Ithird_party/imgui -Ithird_party/stb tests/canvas_host.c host/src/js_canvas.c $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa.c -D_GNU_SOURCE -lm -o $@
 canvas-test: build/canvas_host
 	./build/canvas_host tests/canvas_test.js "$(FONT)" build
 

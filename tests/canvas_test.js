@@ -258,6 +258,29 @@ function dump(name, t) { nx.writePPM(name, nx.surfaceBuffer(t.s), t.canvas.width
   ok("oversized surface throws", tooBig);
 }
 
+// ---- PNG decode --------------------------------------------------------------------------------
+{
+  const hex = "89504e470d0a1a0a0000000d49484452000000040000000208060000007fa87d630000002349444154789c63f8cfc0f01f0c19fe377089c801292060005227528cfe333231b30000ed260d1a503bf6940000000049454e44ae426082";
+  const bytes = new Uint8Array(hex.match(/../g).map((h) => parseInt(h, 16)));
+  const r = nx.decodeImage(bytes.buffer);
+  ok("decodeImage returns an image", r && r.width === 4 && r.height === 2);
+  const c = { _s: r.surface, width: r.width, height: r.height };
+  const ctx = nx.createContext(r.surface, c);
+  eq("png px 0 (opaque red)", px(ctx, 0, 0), [255, 0, 0, 255]);
+  eq("png px 2 keeps straight alpha", px(ctx, 2, 0), [0, 0, 255, 128]);
+  eq("png px 3 (transparent)", px(ctx, 3, 0)[3], 0);
+  eq("png row 2", px(ctx, 2, 1), [200, 100, 50, 255]);
+  const dst = mk(8, 4);
+  dst.ctx.drawImage(c, 0, 0);
+  eq("decoded image drawImage", px(dst.ctx, 1, 0), [0, 255, 0, 255]);
+  eq("decoded image drawImage (alpha blend onto empty)", px(dst.ctx, 2, 0), [0, 0, 255, 128], 1);
+  ok("garbage is not an image", nx.decodeImage(new ArrayBuffer(32)) === null);
+  ok("truncated png is not an image", nx.decodeImage(bytes.slice(0, 40).buffer) === null);
+  ok("non-buffer arg is null", nx.decodeImage("x") === null);
+  const view = new Uint8Array(nx.surfaceBuffer(r.surface));
+  eq("surfaceBuffer over decoded pixels", [view[0], view[1], view[2], view[3]], [255, 0, 0, 255]);
+}
+
 // ---- text --------------------------------------------------------------------------------------
 {
   ok("registerFont", nx.registerFont("TestFont", nx.fontPath));

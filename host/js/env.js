@@ -55,7 +55,56 @@
     toDataURL() { return ""; }
   }
   g.HTMLCanvasElement = Canvas;
-  g.HTMLImageElement = g.Image = class Image { constructor() { this.width = 0; this.height = 0; this.complete = false; } addEventListener() {} };
+  // ---- Blob / object URLs / Image: MV's Decrypter turns an encrypted .rpgmvp into a Blob URL, then
+  // sets it as an Image's src, so Image loading handles both blob: URLs and plain file paths ----------
+  const blobs = new Map();
+  let nextBlob = 1;
+  g.Blob = class Blob { constructor(parts, opts) { this.parts = parts || []; this.type = (opts && opts.type) || ""; } };
+  g.URL = { createObjectURL(b) { const u = "blob:" + nextBlob++; blobs.set(u, b); return u; }, revokeObjectURL(u) { blobs.delete(u); } };
+
+  g.HTMLImageElement = g.Image = class Image {
+    constructor() {
+      this.width = this.height = this.naturalWidth = this.naturalHeight = 0;
+      this.complete = false;
+      this.onload = this.onerror = null;
+      this._src = "";
+      this._s = null;
+      this._ab = null;
+      this._l = {};
+    }
+    get src() { return this._src; }
+    set src(v) {
+      this._src = String(v);
+      this.complete = false;
+      g.setTimeout(() => this._load(this._src), 0);        // loads are asynchronous in a browser, and MV relies on it
+    }
+    get _data() { return this._ab || (this._ab = nx.surfaceBuffer(this._s)); }
+    addEventListener(type, fn) { (this._l[type] || (this._l[type] = [])).push(fn); }
+    removeEventListener(type, fn) { this._l[type] = (this._l[type] || []).filter((f) => f !== fn); }
+    _fire(type) {
+      const ev = { type, target: this };
+      const h = this["on" + type];
+      if (typeof h === "function") h.call(this, ev);
+      for (const fn of (this._l[type] || []).slice()) fn.call(this, ev);
+    }
+    _load(url) {
+      let bytes = null;
+      if (url.startsWith("blob:")) {
+        const b = blobs.get(url);
+        if (b) bytes = b.parts[0];
+      } else {
+        bytes = nx.readBinary(nx.root + "/" + decodeURIComponent(url.split("?")[0]));
+      }
+      const r = bytes ? nx.decodeImage(bytes) : null;
+      if (!r) { this._fire("error"); return; }
+      this._s = r.surface;
+      this._ab = null;
+      this.width = this.naturalWidth = r.width;
+      this.height = this.naturalHeight = r.height;
+      this.complete = true;
+      this._fire("load");
+    }
+  };
   g.HTMLVideoElement = function () {};
   g.WebGLRenderingContext = function () {};
   g.ImageData = function () {};
@@ -120,8 +169,6 @@
     }
   };
 
-  g.Blob = function () {};
-  g.URL = { createObjectURL: () => "", revokeObjectURL() {} };
   g.FontFace = function () {};
 
   // ---- script loading ----------------------------------------------------------------------------
