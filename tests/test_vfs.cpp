@@ -60,6 +60,7 @@ int main() {
     put(mods / "mapfix/img/pictures/a.rpgmvp", "fix-a-enc");
     put(mods / "cheat/mod.json", R"({"name":"Cheat","plugins":[{"name":"AlwaysWin","parameters":{"on":"1"}},"Plain"]})");
     put(mods / "cheat/js/plugins/AlwaysWin.js", "//");
+    put(mods / "hdart/mod.json", R"({"name":"HD Art","version":"1.0","plugin_params":[{"plugin":"TerraxLighting","params":{"Screensize X":"1280"}},{"params":{}}]})");
     put(mods / "broken/mod.json", "{ nope");
     put(mods / "nomanifest/readme.txt", "x");
 
@@ -108,6 +109,14 @@ int main() {
     vfs.setMods(mm.enabledDirs());
     r = vfs.resolve("img/pictures/a.png");
     CHECK(r && !r->encrypted && r->path.find("hdart") != std::string::npos);
+
+    // --- plugin parameter overrides
+    CHECK(mm.find("hdart")->paramOverrides.size() == 1);   // entry without a plugin name is skipped
+    auto po = mm.paramOverrides();                          // hdart and mapfix are enabled here
+    CHECK(po.size() == 1 && po[0].plugin == "TerraxLighting" && po[0].params[0].second == "1280");
+    mm.setEnabled("hdart", false);
+    CHECK(mm.paramOverrides().empty());
+    mm.setEnabled("hdart", true);
 
     // --- plugins only come from enabled mods
     CHECK(mm.extraPlugins().empty());

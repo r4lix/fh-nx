@@ -65,6 +65,18 @@ bool parseMod(const fs::path& dir, Mod& m, std::string& err) {
         }
     }
 
+    if (const Json* po = j.get("plugin_params")) {
+        for (const Json& o : po->a) {
+            ParamOverride ov;
+            ov.plugin = o.str("plugin");
+            const Json* pr = o.get("params");
+            if (ov.plugin.empty() || !pr) continue;
+            for (size_t k = 0; k < pr->keys.size(); k++)
+                ov.params.emplace_back(pr->keys[k], pr->a[k].t == Json::Str ? pr->a[k].s : "");
+            m.paramOverrides.push_back(std::move(ov));
+        }
+    }
+
     std::error_code ec;
     for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         if (!it->is_regular_file(ec)) continue;
@@ -174,6 +186,13 @@ std::vector<PluginEntry> ModManager::extraPlugins() const {
     std::vector<PluginEntry> out;
     for (const Mod& m : mods_)
         if (m.enabled) out.insert(out.end(), m.plugins.begin(), m.plugins.end());
+    return out;
+}
+
+std::vector<ParamOverride> ModManager::paramOverrides() const {
+    std::vector<ParamOverride> out;
+    for (const Mod& m : mods_)
+        if (m.enabled) out.insert(out.end(), m.paramOverrides.begin(), m.paramOverrides.end());
     return out;
 }
 

@@ -10,6 +10,13 @@ struct PluginEntry {
     std::vector<std::pair<std::string, std::string>> params;
 };
 
+// Changes to parameters of a plugin that is already in the game (e.g. a widescreen mod
+// resizing TerraxLighting). Applied over the base plugins.js entry; later mods win.
+struct ParamOverride {
+    std::string plugin;
+    std::vector<std::pair<std::string, std::string>> params;
+};
+
 struct Mod {
     std::string id;            // folder name; also the key in mods.ini
     std::string dir;           // absolute path to the mod folder
@@ -17,6 +24,7 @@ struct Mod {
     bool enabled = false;
     bool affectsSaves = false; // menu warns before toggling: it changes data existing saves rely on
     std::vector<PluginEntry> plugins;
+    std::vector<ParamOverride> paramOverrides;
     std::vector<std::string> files;   // files the mod overrides, relative to its root
 };
 
@@ -47,6 +55,7 @@ public:
 
     std::vector<std::string> enabledDirs() const;         // for Vfs::setMods
     std::vector<PluginEntry> extraPlugins() const;        // appended to the base plugin list
+    std::vector<ParamOverride> paramOverrides() const;    // enabled mods' overrides, load order
     std::vector<Conflict> conflicts() const;
 
 private:
