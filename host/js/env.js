@@ -39,7 +39,8 @@
   g.clearTimeout = g.clearInterval = (id) => { timers = timers.filter((t) => t.id !== id); };
   g.requestAnimationFrame = (cb) => { frameCbs.push(cb); return frameCbs.length; };
   g.cancelAnimationFrame = () => {};
-  g.__tick = function (now) {
+  g.__tick = function () {
+    const now = nx.now();                          // always the clock timers were scheduled against, whatever the host passes
     const due = timers.filter((t) => t.due <= now);
     for (const t of due) {
       if (t.repeat) t.due = now + t.ms; else timers = timers.filter((x) => x !== t);
@@ -52,24 +53,28 @@
   Object.defineProperty(g, "performance", { value: { now: () => nx.now() }, configurable: true, writable: true });
 
   // ---- canvas ---------------------------------------------------------------------------------
-  // Pixels live in native surfaces; the 2D context is the native rasteriser. The first canvas asked
-  // for a WebGL context is "the screen": its size becomes the logical size the GL viewport maps from.
+  // Pixels live in native surfaces; the 2D context is the native rasteriser. "The screen" is the canvas
+  // that both asked for a WebGL context and was given a size by the renderer (PIXI also makes a throwaway
+  // canvas to test WebGL support; that one is never sized, so it never counts). Its size is the logical
+  // size the GL viewport maps from.
   let screenCanvas = null;
   class Canvas {
-    constructor() { this._s = nx.createSurface(300, 150); this._w = 300; this._h = 150; this._ab = null; this._ctx = null; this.style = {}; this.id = ""; }
+    constructor() { this._s = nx.createSurface(300, 150); this._w = 300; this._h = 150; this._ab = null; this._ctx = null; this.style = {}; this.id = ""; this._gl = false; this._sized = false; }
     get width() { return this._w; }
-    set width(v) { this._w = v | 0; this._resize(); }
+    set width(v) { this._w = v | 0; this._sized = true; this._resize(); }
     get height() { return this._h; }
-    set height(v) { this._h = v | 0; this._resize(); }
+    set height(v) { this._h = v | 0; this._sized = true; this._resize(); }
+    _claimScreen() { screenCanvas = this; nx.gl.setLogicalSize(this._w, this._h); }
     _resize() {
-      if (this === screenCanvas) { if (nx.gl.setLogicalSize) nx.gl.setLogicalSize(this._w, this._h); return; }   // the screen has no pixel store
+      if (this._gl) { if (this._sized) this._claimScreen(); return; }       // the screen has no pixel store
       nx.surfaceResize(this._s, this._w, this._h);
       this._ab = null;
     }
     get _data() { return this._ab || (this._ab = nx.surfaceBuffer(this._s)); }   // live RGBA pixels, read by texImage2D
     getContext(type) {
       if (type === "webgl" || type === "experimental-webgl") {
-        if (!screenCanvas) { screenCanvas = this; this._resize(); }
+        this._gl = true;
+        if (this._sized) this._claimScreen();
         return nx.gl;
       }
       if (type === "2d") return this._ctx || (this._ctx = nx.createContext(this._s, this));

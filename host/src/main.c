@@ -148,6 +148,10 @@ static void worker(void *arg) {
         t_js += armGetSystemTick() - a;
 
         eglSwapBuffers(s_display, s_surface);
+        /* A swap with nothing new drawn returns at once (MV skips frames), which would spin the loop at
+         * 120 ticks/s. The game logic is a fixed 60 Hz, so never tick faster than that. */
+        u64 spent = armGetSystemTick() - a, budget = armGetSystemTickFreq() / 60;
+        if (spent < budget) svcSleepThread(armTicksToNs(budget - spent));
         if (++frames % 300 == 0) {
             double secs = (double)(armGetSystemTick() - t0) / armGetSystemTickFreq();
             say("[host] %llu frames, %.1f fps, JS+GL %.2f ms/frame\n", (unsigned long long)frames, frames / secs,

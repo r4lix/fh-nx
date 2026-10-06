@@ -22,7 +22,7 @@ function makeFakeGL(width, height) {
     programInfo.set(program, info);
     return info;
   }
-  const own = { drawingBufferWidth: width, drawingBufferHeight: height, __calls: calls, setLogicalSize() {} };
+  const own = { drawingBufferWidth: width, drawingBufferHeight: height, __calls: calls, setLogicalSize(w, h) { calls.logical = [w, h]; } };
   return new Proxy(own, {
     get(t, k) {
       if (typeof k !== "string") return undefined;
