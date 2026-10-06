@@ -154,6 +154,63 @@ function dump(name, t) { nx.writePPM(name, nx.surfaceBuffer(t.s), t.canvas.width
   eq("drawImage mirrored", px(f.ctx, 0, 0), [0, 0, 255, 255]);
 }
 
+// ---- scaled drawImage vs a reference bilinear sampler ---------------------------------------------
+{
+  function refScale(src, sw, sh, dw, dh) {                         // pixel-centre mapping, edge clamp, premultiplied taps
+    const out = [];
+    for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) {
+      const fu = (x + 0.5) * sw / dw - 0.5, fv = (y + 0.5) * sh / dh - 0.5;
+      const x0 = Math.floor(fu), y0 = Math.floor(fv), ax = fu - x0, ay = fv - y0;
+      const cl = (v, m) => Math.max(0, Math.min(m - 1, v));
+      let A = 0, R = 0, G = 0, B = 0;
+      for (const [dx, dy, w] of [[0, 0, (1 - ax) * (1 - ay)], [1, 0, ax * (1 - ay)], [0, 1, (1 - ax) * ay], [1, 1, ax * ay]]) {
+        const p = src[cl(y0 + dy, sh) * sw + cl(x0 + dx, sw)];
+        A += p[3] * w; R += p[0] * p[3] * w; G += p[1] * p[3] * w; B += p[2] * p[3] * w;
+      }
+      out.push(A > 0 ? [R / A, G / A, B / A, A] : [0, 0, 0, 0]);
+    }
+    return out;
+  }
+  function makeImage(pixels, w, h) {
+    const t = mk(w, h);
+    const d = t.ctx.createImageData(w, h);
+    pixels.forEach((p, i) => { d.data[i * 4] = p[0]; d.data[i * 4 + 1] = p[1]; d.data[i * 4 + 2] = p[2]; d.data[i * 4 + 3] = p[3]; });
+    t.ctx.putImageData(d, 0, 0);
+    return t;
+  }
+  const cases = [
+    ["opaque 3x2 -> 9x6", [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255], [255, 255, 0, 255], [0, 255, 255, 255], [255, 0, 255, 255]], 3, 2, 9, 6],
+    ["opaque 4x4 -> 2x2 (down)", Array.from({ length: 16 }, (_, i) => [i * 16, 255 - i * 16, (i * 37) % 256, 255]), 4, 4, 2, 2],
+    ["with transparency 2x2 -> 6x6", [[255, 0, 0, 255], [0, 0, 255, 0], [0, 255, 0, 128], [255, 255, 255, 255]], 2, 2, 6, 6],
+  ];
+  for (const [name, pix, sw, sh, dw, dh] of cases) {
+    const src = makeImage(pix, sw, sh), dst = mk(dw, dh);
+    dst.ctx.drawImage(src.canvas, 0, 0, sw, sh, 0, 0, dw, dh);
+    const want = refScale(pix, sw, sh, dw, dh), got = dst.ctx.getImageData(0, 0, dw, dh).data;
+    let worst = 0;
+    for (let i = 0; i < dw * dh; i++) {
+      const w = want[i], a = got[i * 4 + 3];
+      worst = Math.max(worst, Math.abs(a - w[3]));
+      if (w[3] > 2) for (let k = 0; k < 3; k++) worst = Math.max(worst, Math.abs(got[i * 4 + k] - w[k]));
+    }
+    ok("scaled drawImage matches reference: " + name + " (worst error " + worst.toFixed(1) + ")", worst <= 3);
+  }
+  const part = mk(10, 10);
+  part.ctx.drawImage(makeImage([[9, 9, 9, 255]], 1, 1).canvas, 0, 0, 1, 1, 2.5, 2.5, 4, 4);   // fractional destination: edges only by pixel centres
+  ok("fractional destination fills the covered centres", px(part.ctx, 4, 4)[3] === 255 && px(part.ctx, 1, 1)[3] === 0);
+}
+
+// ---- native adjustTone (Bitmap.adjustTone) ----------------------------------------------------------
+{
+  const { ctx } = mk(3, 1);
+  ctx.fillStyle = "rgb(100, 200, 250)"; ctx.fillRect(0, 0, 2, 1);
+  ctx.__adjustTone(20, -30, 30);
+  eq("adjustTone adds and clamps", px(ctx, 0, 0), [120, 170, 255, 255]);
+  eq("adjustTone leaves alpha alone (transparent pixel keeps alpha 0)", px(ctx, 2, 0), [20, 0, 30, 0]);
+  ctx.__adjustTone(-255, -255, -255);
+  eq("adjustTone clamps at zero", px(ctx, 0, 0), [0, 0, 0, 255]);
+}
+
 // ---- gradients ---------------------------------------------------------------------------------
 {
   const { ctx } = mk(100, 4);

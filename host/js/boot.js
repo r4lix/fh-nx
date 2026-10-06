@@ -22,6 +22,35 @@
   g.Graphics.printError = (name, message) => nx.log("MV ERROR: " + name + ": " + message);
   g.Graphics.printLoadingError = (url) => nx.log("MV LOADING ERROR: " + url);
 
+  // Port patch: Bitmap.adjustTone is a per-pixel JavaScript loop over getImageData (every window refresh pays
+  // it); the native context does the identical clamped add in one pass.
+  g.Bitmap.prototype.adjustTone = function (r, gr, b) {
+    if ((r || gr || b) && this.width > 0 && this.height > 0) {
+      this._context.__adjustTone(r, gr, b);
+      this._setDirty();
+    }
+  };
+
+  // Port patch: MV keeps 100 Sprite_Picture objects alive and runs update + updateBitmap + a Game_Screen lookup
+  // on each of them every frame, even with no picture shown: ~170 interpreted calls per frame doing nothing.
+  // A hidden sprite whose own picture slot is empty is skipped. The picture array and the in-battle offset
+  // are fetched once per frame, so the per-sprite check is one array read.
+  {
+    const update = g.Sprite_Picture.prototype.update;
+    let stamp = -1, pics = null, offset = 0;
+    g.Sprite_Picture.prototype.update = function () {
+      if (!this.visible) {
+        if (stamp !== Graphics.frameCount) {
+          stamp = Graphics.frameCount;
+          pics = $gameScreen._pictures;
+          offset = $gameParty.inBattle() ? $gameScreen.maxPictures() : 0;
+        }
+        if (!pics[this._pictureId + offset]) return;
+      }
+      update.apply(this, arguments);
+    };
+  }
+
   // Port patches: plugins that work around browser limits the native host does not have.
   //  - DSE-AudioLagFix streams BGM through HTML5 <audio> elements; the native mixer already streams from
   //    compressed data, so the stock WebAudio path is used instead.
@@ -29,6 +58,45 @@
   for (const p of g.$plugins) if (DISABLED.includes(p.name) && p.status) { p.status = false; nx.log("port patch: plugin " + p.name + " disabled"); }
 
   __loadScript("js/main.js");                         // PluginManager.setup($plugins); window.onload = ...
+
+  // Load shedding for TerraxLighting. The plugin repaints a screen-sized mask every logic update, the single
+  // biggest per-frame cost in lit maps. When ticks run over budget it repaints every 2nd (or 3rd) update:
+  // the previous mask stays on screen (and is not re-uploaded), and lights lag by at most a frame or two.
+  // On a machine that keeps up it never skips. Lightmask is private to the plugin's closure, so it is
+  // reached through the instance Spriteset_Map.createLightmask makes.
+  if (g.Spriteset_Map.prototype.createLightmask) {
+    const budget = () => (typeof g.__perfBudgetMs === "number" ? g.__perfBudgetMs : 12);
+    const create = g.Spriteset_Map.prototype.createLightmask;
+    g.Spriteset_Map.prototype.createLightmask = function () {
+      create.apply(this, arguments);
+      const proto = this._lightmask && Object.getPrototypeOf(this._lightmask);
+      // Half-resolution mask: lighting is soft gradients, so the mask bitmap is drawn at 1/k size (the 2D
+      // context is scaled so the plugin's own coordinates stay valid) and its sprite is scaled back up by k.
+      // Every pixel operation and the per-frame texture upload get k*k cheaper. g.__lightScale = 1 disables.
+      const k = typeof g.__lightScale === "number" ? g.__lightScale : 2, bmp = this._lightmask && this._lightmask._maskBitmap;
+      if (k > 1 && bmp && !bmp.__scaled) {
+        bmp.resize(Math.ceil(bmp.width / k), Math.ceil(bmp.height / k));
+        bmp._context.scale(1 / k, 1 / k);
+        bmp.__scaled = k;
+        nx.log("port patch: lighting mask at 1/" + k + " resolution (" + bmp.width + "x" + bmp.height + ")");
+      }
+      if (!proto || proto.__shed) return;
+      proto.__shed = true;
+      const addSprite = proto._addSprite;
+      proto._addSprite = function (x, y, b) {
+        addSprite.apply(this, arguments);
+        if (b && b.__scaled) { const sp = this._sprites[this._sprites.length - 1]; if (sp) sp.scale.x = sp.scale.y = b.__scaled; }
+      };
+      const update = proto.update;
+      proto.update = function () {
+        const over = g.__frameMs / budget();
+        const every = over > 2 ? 3 : over > 1 ? 2 : 1;
+        this.__skip = ((this.__skip || 0) + 1) % every;
+        if (this.__skip === 0 || !this.__drawn) { this.__drawn = true; update.call(this); }
+      };
+      nx.log("port patch: TerraxLighting load shedding installed");
+    };
+  }
   step("plugins loaded");
   g.window.onload();                                  // SceneManager.run(Scene_Boot)
   step("SceneManager.run");

@@ -1189,6 +1189,92 @@ static Surface *source_surface(JSContext *ctx, JSValueConst v) {
     return s;
 }
 
+/* Unrotated, positively scaled drawImage (window skins, stretched backgrounds, scene snapshots): the
+ * sampling positions per column and per row are computed once, then each pixel is a fixed-point bilinear
+ * blend of four texels. The generic inverse-mapping path costs several times more per pixel. */
+static void draw_scaled_axis(Ctx *c, const Surface *src, int isx, int isy, int isw, int ish, const double *full,
+                             int x0, int y0, int x1, int y1) {
+    int W = x1 - x0, H = y1 - y0;
+    if (W <= 0 || H <= 0) return;
+    int smooth = c->st.smooth, gaw = global_alpha255(&c->st), comp = c->st.comp;
+    int fast = comp == SRC_OVER && !c->st.clip && gaw == 255;
+    int *tab = malloc(sizeof(int) * 4 * (size_t)(W + H));
+    int *ca = tab, *cb = tab + W, *cw = tab + 2 * W, *rv = tab + 3 * W;          /* columns: a, b, weight, valid */
+    int *ra = tab + 4 * W, *rb = ra + H, *rw = ra + 2 * H, *rvalid = ra + 3 * H;
+    (void)rv;
+    int *cvalid = tab + 3 * W;
+    for (int i = 0; i < W; i++) {
+        double u = (x0 + i + 0.5 - full[4]) / full[0];
+        cvalid[i] = u >= 0 && u < isw;
+        if (!cvalid[i]) continue;
+        if (smooth) {
+            double fu = u - 0.5;
+            int ia = (int)floor(fu);
+            cw[i] = (int)((fu - ia) * 256);
+            ca[i] = ia < 0 ? 0 : ia >= isw ? isw - 1 : ia;
+            cb[i] = ia + 1 < 0 ? 0 : ia + 1 >= isw ? isw - 1 : ia + 1;
+        } else {
+            int ia = (int)floor(u);
+            ca[i] = cb[i] = ia < 0 ? 0 : ia >= isw ? isw - 1 : ia;
+            cw[i] = 0;
+        }
+    }
+    for (int j = 0; j < H; j++) {
+        double v = (y0 + j + 0.5 - full[5]) / full[3];
+        rvalid[j] = v >= 0 && v < ish;
+        if (!rvalid[j]) continue;
+        if (smooth) {
+            double fv = v - 0.5;
+            int ia = (int)floor(fv);
+            rw[j] = (int)((fv - ia) * 256);
+            ra[j] = ia < 0 ? 0 : ia >= ish ? ish - 1 : ia;
+            rb[j] = ia + 1 < 0 ? 0 : ia + 1 >= ish ? ish - 1 : ia + 1;
+        } else {
+            int ia = (int)floor(v);
+            ra[j] = rb[j] = ia < 0 ? 0 : ia >= ish ? ish - 1 : ia;
+            rw[j] = 0;
+        }
+    }
+    const uint8_t *spx = src->b->px;
+    for (int j = 0; j < H; j++) {
+        if (!rvalid[j]) continue;
+        const uint8_t *rowa = spx + ((size_t)(isy + ra[j]) * src->w + isx) * 4;
+        const uint8_t *rowb = spx + ((size_t)(isy + rb[j]) * src->w + isx) * 4;
+        int wy = rw[j];
+        uint8_t *drow = c->s->b->px + ((size_t)(y0 + j) * c->s->w + x0) * 4;
+        for (int i = 0; i < W; i++, drow += 4) {
+            if (!cvalid[i]) continue;
+            int wx = cw[i];
+            const uint8_t *p00 = rowa + ca[i] * 4, *p10 = rowa + cb[i] * 4, *p01 = rowb + ca[i] * 4, *p11 = rowb + cb[i] * 4;
+            RGBA o;
+            if ((p00[3] & p10[3] & p01[3] & p11[3]) == 255) {                     /* opaque neighbourhood */
+                int w00 = (256 - wx) * (256 - wy), w10 = wx * (256 - wy), w01 = (256 - wx) * wy, w11 = wx * wy;
+                o.r = (uint8_t)((p00[0] * w00 + p10[0] * w10 + p01[0] * w01 + p11[0] * w11 + 32768) >> 16);
+                o.g = (uint8_t)((p00[1] * w00 + p10[1] * w10 + p01[1] * w01 + p11[1] * w11 + 32768) >> 16);
+                o.b = (uint8_t)((p00[2] * w00 + p10[2] * w10 + p01[2] * w01 + p11[2] * w11 + 32768) >> 16);
+                o.a = 255;
+            } else {
+                long w00 = (256 - wx) * (256 - wy), w10 = wx * (256 - wy), w01 = (256 - wx) * wy, w11 = wx * wy;
+                long a00 = p00[3] * w00, a10 = p10[3] * w10, a01 = p01[3] * w01, a11 = p11[3] * w11;
+                long sa = a00 + a10 + a01 + a11;
+                if (sa == 0) continue;
+                o.r = (uint8_t)((p00[0] * a00 + p10[0] * a10 + p01[0] * a01 + p11[0] * a11) / sa);
+                o.g = (uint8_t)((p00[1] * a00 + p10[1] * a10 + p01[1] * a01 + p11[1] * a11) / sa);
+                o.b = (uint8_t)((p00[2] * a00 + p10[2] * a10 + p01[2] * a01 + p11[2] * a11) / sa);
+                o.a = (uint8_t)((sa + 32768) >> 16);
+            }
+            if (fast) {
+                if (o.a == 255) { drow[0] = o.r; drow[1] = o.g; drow[2] = o.b; drow[3] = 255; }
+                else if (o.a) blend_px(drow, o, o.a, SRC_OVER);
+            } else {
+                if (o.a == 0 && comp != COPY) continue;
+                put_px(c, x0 + i, y0 + j, o, 255);
+            }
+        }
+    }
+    free(tab);
+}
+
 static JSValue c2d_drawImage(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     Ctx *c = get_ctx(ctx, self);
     if (!c) return JS_EXCEPTION;
@@ -1240,8 +1326,13 @@ static JSValue c2d_drawImage(JSContext *ctx, JSValueConst self, int argc, JSValu
 
     int identity = fabs(full[0] - 1) < 1e-9 && fabs(full[3] - 1) < 1e-9 && full[1] == 0 && full[2] == 0 &&
                    fabs(full[4] - lrint(full[4])) < 1e-9 && fabs(full[5] - lrint(full[5])) < 1e-9;
+    if (!identity && full[1] == 0 && full[2] == 0 && full[0] > 0 && full[3] > 0) {
+        draw_scaled_axis(c, src, isx, isy, isw, ish, full, x0, y0, x1, y1);
+        return JS_UNDEFINED;
+    }
     int gaw = global_alpha255(&c->st);
-    int fast_copy = identity && c->st.comp == SRC_OVER && !c->st.clip && gaw == 255;
+    int fast_copy = identity && c->st.comp == SRC_OVER && !c->st.clip;           /* any globalAlpha: handled per pixel below */
+    int fast_add = identity && c->st.comp == LIGHTER && !c->st.clip;               /* Bitmap.blur: nine additive copies, alpha 1/9 */
     for (int y = y0; y < y1; y++) {
         for (int x = x0; x < x1; x++) {
             RGBA s;
@@ -1249,10 +1340,22 @@ static JSValue c2d_drawImage(JSContext *ctx, JSValueConst self, int argc, JSValu
                 int u = x - (int)lrint(full[4]), v = y - (int)lrint(full[5]);
                 if (u < 0 || v < 0 || u >= isw || v >= ish) continue;
                 const uint8_t *p = src->b->px + ((size_t)(isy + v) * src->w + isx + u) * 4;
-                if (fast_copy) {                                   /* plain over, no clip, full alpha: skip put_px's per-pixel work */
-                    if (p[3] == 255) { memcpy(c->s->b->px + ((size_t)y * c->s->w + x) * 4, p, 4); continue; }
+                if (fast_copy) {                                   /* plain over, no clip: skip put_px's per-pixel work */
+                    if (p[3] == 255 && gaw == 255) { memcpy(c->s->b->px + ((size_t)y * c->s->w + x) * 4, p, 4); continue; }
                     if (p[3] == 0) continue;
                     blend_px(c->s->b->px + ((size_t)y * c->s->w + x) * 4, (RGBA){p[0], p[1], p[2], p[3]}, mul255(p[3], gaw), SRC_OVER);
+                    continue;
+                }
+                if (fast_add) {
+                    uint8_t *d = c->s->b->px + ((size_t)y * c->s->w + x) * 4;
+                    if (p[3] == 0) continue;
+                    int a = mul255(p[3], gaw);
+                    if (d[3] == 255) {
+                        int v;
+                        v = d[0] + mul255(p[0], a); d[0] = v > 255 ? 255 : v;
+                        v = d[1] + mul255(p[1], a); d[1] = v > 255 ? 255 : v;
+                        v = d[2] + mul255(p[2], a); d[2] = v > 255 ? 255 : v;
+                    } else blend_px(d, (RGBA){p[0], p[1], p[2], p[3]}, a, LIGHTER);
                     continue;
                 }
                 s = (RGBA){p[0], p[1], p[2], p[3]};
@@ -1302,6 +1405,27 @@ static JSValue c2d_getImageData(JSContext *ctx, JSValueConst self, int argc, JSV
     free(tmp);
     return r;
 }
+/* Bitmap.adjustTone, natively: add (r,g,b) to every pixel's colour, clamped, alpha untouched. MV does this
+ * with a per-pixel JavaScript loop over getImageData, ~7 ms per window background on a PC and every window
+ * refresh pays it. */
+static JSValue c2d_adjustTone(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    Ctx *c = get_ctx(ctx, self);
+    if (!c) return JS_EXCEPTION;
+    int dr = (int)argd(ctx, argv, 0), dg = (int)argd(ctx, argv, 1), db = (int)argd(ctx, argv, 2);
+    uint8_t *p = c->s->b->px;
+    size_t n = (size_t)c->s->w * c->s->h;
+    if (dr < -255) dr = -255; if (dr > 255) dr = 255;
+    if (dg < -255) dg = -255; if (dg > 255) dg = 255;
+    if (db < -255) db = -255; if (db > 255) db = 255;
+    for (size_t i = 0; i < n; i++, p += 4) {
+        int v;
+        v = p[0] + dr; p[0] = v < 0 ? 0 : v > 255 ? 255 : v;
+        v = p[1] + dg; p[1] = v < 0 ? 0 : v > 255 ? 255 : v;
+        v = p[2] + db; p[2] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+    return JS_UNDEFINED;
+}
+
 static JSValue c2d_createImageData(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     int w = (int)argd(ctx, argv, 0), h = (int)argd(ctx, argv, 1);
     if (w <= 0 || h <= 0) return JS_ThrowRangeError(ctx, "createImageData: empty size");
@@ -1667,7 +1791,7 @@ static const JSCFunctionListEntry k_ctx_funcs[] = {
     JS_CFUNC_DEF("fillRect", 4, c2d_fillRect), JS_CFUNC_DEF("strokeRect", 4, c2d_strokeRect),
     JS_CFUNC_DEF("clearRect", 4, c2d_clearRect), JS_CFUNC_DEF("drawImage", 9, c2d_drawImage),
     JS_CFUNC_DEF("getImageData", 4, c2d_getImageData), JS_CFUNC_DEF("putImageData", 3, c2d_putImageData),
-    JS_CFUNC_DEF("createImageData", 2, c2d_createImageData),
+    JS_CFUNC_DEF("createImageData", 2, c2d_createImageData), JS_CFUNC_DEF("__adjustTone", 3, c2d_adjustTone),
     JS_CFUNC_DEF("createLinearGradient", 4, c2d_createLinearGradient),
     JS_CFUNC_DEF("createRadialGradient", 6, c2d_createRadialGradient),
     JS_CFUNC_DEF("measureText", 1, c2d_measureText), JS_CFUNC_DEF("fillText", 4, c2d_fillText),

@@ -39,7 +39,8 @@
   g.clearTimeout = g.clearInterval = (id) => { timers = timers.filter((t) => t.id !== id); };
   g.requestAnimationFrame = (cb) => { frameCbs.push(cb); return frameCbs.length; };
   g.cancelAnimationFrame = () => {};
-  g.__tick = function () {
+  g.__frameMs = 8;                                 // smoothed cost of one tick (timers + animation frame), for load shedding
+  const __tickBody = function () {
     const now = nx.now();                          // always the clock timers were scheduled against, whatever the host passes
     const due = timers.filter((t) => t.due <= now);
     for (const t of due) {
@@ -50,6 +51,11 @@
     const cbs = frameCbs;
     frameCbs = [];
     for (const cb of cbs) cb(now);
+  };
+  g.__tick = function () {
+    const t = nx.now();
+    __tickBody();
+    g.__frameMs = g.__frameMs * 0.9 + (nx.now() - t) * 0.1;
   };
   Object.defineProperty(g, "performance", { value: { now: () => nx.now() }, configurable: true, writable: true });
 

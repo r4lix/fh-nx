@@ -137,7 +137,7 @@ static void worker(void *arg) {
     int ok = run_file(ctx, BASE "/js/env.js") && run_file(ctx, entry);
     JSValue tick = JS_GetPropertyStr(ctx, g, "__tick");
     int errors = 0;
-    u64 frames = 0, t_js = 0;
+    u64 frames = 0, t_js = 0, t_swap = 0;
     u64 t0 = armGetSystemTick();
 
     while (ok && !g_quit) {
@@ -154,16 +154,23 @@ static void worker(void *arg) {
         while (JS_ExecutePendingJob(rt, &pc) > 0) {}
         t_js += armGetSystemTick() - a;
 
+        u64 sw0 = armGetSystemTick();
         eglSwapBuffers(s_display, s_surface);
+        t_swap += armGetSystemTick() - sw0;
         /* A swap with nothing new drawn returns at once (MV skips frames), which would spin the loop at
          * 120 ticks/s. The game logic is a fixed 60 Hz, so never tick faster than that. */
         u64 spent = armGetSystemTick() - a, budget = armGetSystemTickFreq() / 60;
         if (spent < budget) svcSleepThread(armTicksToNs(budget - spent));
         if (++frames % 300 == 0) {
             double secs = (double)(armGetSystemTick() - t0) / armGetSystemTickFreq();
-            say("[host] %llu frames, %.1f fps, JS+GL %.2f ms/frame, audio played %.1f s\n", (unsigned long long)frames, frames / secs,
-                (double)t_js * 1000.0 / armGetSystemTickFreq() / 300, audio_out_played() / 48000.0);
-            t_js = 0; t0 = armGetSystemTick(); frames = 0;
+            JsGlStats gs;
+            js_gl_stats(&gs, 1);
+            double ms = 1000.0 / armGetSystemTickFreq() / 300;           /* ticks -> ms per frame over the 300-frame window */
+            say("[host] %llu frames, %.1f fps, JS+GL %.2f ms/frame (swap wait %.2f; GL: upload %.2f [%.1f/frame, %.2f MB/frame], draw %.2f [%.0f/frame], buffer %.2f), audio played %.1f s\n",
+                (unsigned long long)frames, frames / secs, (double)t_js * ms, (double)t_swap * ms, (double)gs.upload_ticks * ms,
+                gs.upload_n / 300.0, gs.upload_bytes / 300.0 / 1048576.0, (double)gs.draw_ticks * ms, gs.draw_n / 300.0,
+                (double)gs.buffer_ticks * ms, audio_out_played() / 48000.0);
+            t_js = 0; t_swap = 0; t0 = armGetSystemTick(); frames = 0;
         }
     }
 

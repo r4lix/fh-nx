@@ -12,6 +12,14 @@
 #include <GLES2/gl2.h>
 
 #include "js_gl.h"
+#include <switch.h>
+
+static JsGlStats g_stats;
+void js_gl_stats(JsGlStats *out, int reset) {
+    if (out) *out = g_stats;
+    if (reset) memset(&g_stats, 0, sizeof g_stats);
+}
+#define TICK() armGetSystemTick()
 
 #define UNPACK_FLIP_Y 0x9240
 #define UNPACK_PREMULTIPLY 0x9241
@@ -232,14 +240,18 @@ FN(bufferData) {
     uint32_t target = U(0), usage = U(2);
     size_t len;
     const uint8_t *p = view_bytes(ctx, argv[1], &len);
+    u64 t = TICK();
     if (p) glBufferData(target, len, p, usage);
     else glBufferData(target, (GLsizeiptr)I(1), NULL, usage);
+    g_stats.buffer_ticks += TICK() - t; g_stats.buffer_n++;
     return JS_UNDEFINED;
 }
 FN(bufferSubData) {
     size_t len;
     const uint8_t *p = view_bytes(ctx, argv[2], &len);
+    u64 t = TICK();
     if (p) glBufferSubData(U(0), I(1), len, p);
+    g_stats.buffer_ticks += TICK() - t; g_stats.buffer_n++;
     return JS_UNDEFINED;
 }
 FN(vertexAttribPointer) {
@@ -248,8 +260,8 @@ FN(vertexAttribPointer) {
 }
 FN(enableVertexAttribArray) { glEnableVertexAttribArray(U(0)); return JS_UNDEFINED; }
 FN(disableVertexAttribArray) { glDisableVertexAttribArray(U(0)); return JS_UNDEFINED; }
-FN(drawArrays) { glDrawArrays(U(0), I(1), I(2)); return JS_UNDEFINED; }
-FN(drawElements) { glDrawElements(U(0), I(1), U(2), (const void *)(uintptr_t)U(3)); return JS_UNDEFINED; }
+FN(drawArrays) { u64 t = TICK(); glDrawArrays(U(0), I(1), I(2)); g_stats.draw_ticks += TICK() - t; g_stats.draw_n++; return JS_UNDEFINED; }
+FN(drawElements) { u64 t = TICK(); glDrawElements(U(0), I(1), U(2), (const void *)(uintptr_t)U(3)); g_stats.draw_ticks += TICK() - t; g_stats.draw_n++; return JS_UNDEFINED; }
 
 /* ---- shaders and programs --------------------------------------------------------------------- */
 
@@ -475,7 +487,9 @@ FN(texImage2D) {
         int w = 0, h = 0;
         uint8_t *tmp;
         const uint8_t *p = source_pixels(ctx, argv[5], &w, &h, &tmp);
+        u64 t = TICK();
         if (p) glTexImage2D(U(0), I(1), I(2), w, h, 0, U(3), U(4), p);
+        g_stats.upload_ticks += TICK() - t; g_stats.upload_n++; g_stats.upload_bytes += (unsigned long long)w * h * 4;
         free(tmp);
     }
     return JS_UNDEFINED;
@@ -489,7 +503,9 @@ FN(texSubImage2D) {
         int w = 0, h = 0;
         uint8_t *tmp;
         const uint8_t *p = source_pixels(ctx, argv[6], &w, &h, &tmp);
+        u64 t = TICK();
         if (p) glTexSubImage2D(U(0), I(1), I(2), I(3), w, h, U(4), U(5), p);
+        g_stats.upload_ticks += TICK() - t; g_stats.upload_n++; g_stats.upload_bytes += (unsigned long long)w * h * 4;
         free(tmp);
     }
     return JS_UNDEFINED;
