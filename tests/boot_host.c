@@ -10,6 +10,7 @@
 #include "../host/src/js_canvas.h"
 #include "../host/src/nx_common.h"
 #include "../host/src/audio_mix.h"
+#include "../host/src/js_alloc.h"
 
 static void log_line(const char *s) { printf("%s\n", s); fflush(stdout); }
 
@@ -36,7 +37,7 @@ int main(int argc, char **argv) {
     double seconds = atof(argv[3]);
     const char *save = argc > 4 ? argv[4] : "build/save";
 
-    JSRuntime *rt = JS_NewRuntime();
+    JSRuntime *rt = getenv("FH_DEFAULT_ALLOC") ? JS_NewRuntime() : JS_NewRuntime2(js_fast_malloc_functions(), NULL);   /* FH_DEFAULT_ALLOC=1 for A/B */
     JS_SetMaxStackSize(rt, 8u << 20);
     JSContext *ctx = JS_NewContext(rt);
     JSValue g = JS_GetGlobalObject(ctx), nx = JS_NewObject(ctx);

@@ -33,11 +33,11 @@ $(foreach f,$(VORBIS_SRC) $(OGG_SRC),$(eval build/tp_$(notdir $(f)).o: $(f).c ; 
 
 # the rasteriser is float-heavy and self-contained: let the compiler vectorise it (never QuickJS: JS needs strict NaN/inf)
 build/js_canvas.o: CFLAGS += -O3 -ffast-math
-build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/audio_mix.h src/audio_out.h src/gl_consts.inc
+build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/audio_mix.h src/audio_out.h src/js_alloc.h src/gl_consts.inc
 	@mkdir -p build
 	$(CC) $(CFLAGS) $(AUDIO_INC) -c $< -o $@
 # linked with g++: Mesa's EGL is C++
-build/fh-nx.elf: build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o $(THIRD_OBJ) build/quickjs.o build/fh-nx.nacp
-	$(CXX) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o $(THIRD_OBJ) build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
+build/fh-nx.elf: build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o build/js_alloc.o $(THIRD_OBJ) build/quickjs.o build/fh-nx.nacp
+	$(CXX) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o build/js_alloc.o $(THIRD_OBJ) build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
 clean:
 	rm -rf build

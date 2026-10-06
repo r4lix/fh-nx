@@ -24,7 +24,12 @@
     [Game_Message.prototype, "Game_Message."], [Game_CharacterBase.prototype, "Game_CharBase."], [Game_Event.prototype, "Game_Event."]]) wrapAll(o, n);
   wrapAll(Graphics, "Graphics."); wrapAll(SceneManager, "SceneManager."); wrapAll(AudioManager, "Audio.");
 
+  function deepWrap() {
+    wrapAll(Game_Event.prototype, "Game_Event."); wrapAll(Game_Character.prototype, "Game_Character."); wrapAll(Game_CharacterBase.prototype, "Game_CharBase.");
+    nx.log("[deep] wrappers installed");
+  }
   const orig = g.__tick;
+  g.__profiled = {};
   let step = 0, stepAt = 0, frames = 0, wall = 0, startOn = 0, done = false, lastLog = 0, t0 = now();
   g.__tick = function (t) {
     if (held && now() >= releaseAt) held = 0;
@@ -41,17 +46,26 @@
       case 5: if (sc === "Scene_Map" && $gameMessage.isChoice() && since > 3000) { nx.log("[play] game mode choice: A"); press("A"); next(); } break;
       case 6:
         if ($gameMessage.isChoice()) { if (n - (g.__lastA || 0) > 2500) { g.__lastA = n; nx.log("[play] choice: A"); press("A"); } }
-        else if ($gameMessage.hasText() && since > 6000) { if (!g.__narr) g.__narr = n; else if (n - g.__narr > 2500) { nx.log("[play] narration on screen, profiling"); on = true; startOn = n; next(); } }
+        else if ($gameMessage.hasText() && since > 6000) { if (!g.__narr) g.__narr = n; else if (n - g.__narr > 2500) { nx.log("[play] narration on screen, advancing to the first playable map"); next(); } }
         break;
+      case 7: {                                               // keep pressing A through the intro until the player can move on a real map
+        if (n - (g.__lastA || 0) > 1200) { g.__lastA = n; press("A"); }
+        const id = $gameMap ? $gameMap.mapId() : 0;
+        if (id !== g.__lastMap) { g.__lastMap = id; nx.log("[play +" + ((n - t0) / 1000).toFixed(0) + "s] map " + id + " " + ($dataMapInfos[id] ? $dataMapInfos[id].name : "")); }
+        const free = sc === "Scene_Map" && $gamePlayer.canMove() && !$gameMessage.hasText() && !$gameMap._interpreter.isRunning();
+        if (free && !g.__profiled[id]) { if (!g.__free) g.__free = n; else if (n - g.__free > 3000) { g.__profiled[id] = true; g.__label = "map " + id + " " + ($dataMapInfos[id] ? $dataMapInfos[id].name : "") + " (" + $gameMap.events().length + " events)"; nx.log("[play] player is free: profiling " + g.__label); acc.clear(); frames = 0; wall = 0; done = false; on = true; startOn = n; if (id === 74 && !g.__deepDone) { g.__deepDone = true; deepWrap(); } } } else if (!free) g.__free = 0;
+        break;
+      }
       default: break;
     }
     if (on) { frames++; wall += now() - a; }
     if (on && !done && n - startOn > 6000) {
       done = true; on = false;
+      nx.log("[prof6] === " + g.__label);
       nx.log("[prof6] " + frames + " ticks, avg tick " + (wall / frames).toFixed(2) + " ms (instrumented); inclusive ms/tick:");
-      for (const [k, e] of [...acc.entries()].sort((x, y) => y[1].ms - x[1].ms).slice(0, 26))
+      for (const [k, e] of [...acc.entries()].sort((x, y) => y[1].ms - x[1].ms).slice(0, g.__label && /map 74/.test(g.__label) ? 40 : 14))
         nx.log("[prof6] " + k.padEnd(38) + (e.ms / frames).toFixed(3).padStart(8) + " ms/tick " + (e.n / frames).toFixed(1).padStart(7) + " calls/tick");
     }
-    if (!done && n - lastLog > 4000) { lastLog = n; nx.log("[play +" + ((n - t0) / 1000).toFixed(0) + "s] step " + step + " scene " + sc + " msg " + $gameMessage.hasText() + " choice " + $gameMessage.isChoice()); }
+    if (n - lastLog > 8000) { lastLog = n; nx.log("[play +" + ((n - t0) / 1000).toFixed(0) + "s] step " + step + " scene " + sc + " msg " + $gameMessage.hasText() + " choice " + $gameMessage.isChoice()); }
   };
 })(globalThis);

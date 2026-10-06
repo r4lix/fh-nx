@@ -59,6 +59,293 @@
 
   __loadScript("js/main.js");                         // PluginManager.setup($plugins); window.onload = ...
 
+  // ---- Engine port patches for a bytecode interpreter (QuickJS is ~10-30x slower than the browser JIT this
+  // game was built for, and one big map costs ~20 ms per logic update). Each keeps behaviour identical. ----
+
+  // 1. Every switch/variable/self-switch write requests a full map refresh (every event re-evaluates its page
+  //    conditions, ~2-4 ms per update on a big map), and F&H's parallel events write counters every frame. An
+  //    event page only depends on: two switches, one variable threshold, a self switch, an item and an actor
+  //    (Game_Event.meetsConditions; no plugin here changes that), and a common event only on its trigger switch.
+  //    So a refresh is requested only when the value really changed AND some page on this map (or common event)
+  //    references that switch/variable. Self switches keep the unchanged-value guard. The dependency sets are
+  //    built per map from $dataMap and rebuilt on Game_Map.setup.
+  g.__stateVer = 1; g.__actVer = 1;
+  {
+    const GM = g.Game_Map.prototype, setup = GM.setup;
+    GM.setup = function () { this.__deps = null; g.__stateVer++; g.__actVer++; return setup.apply(this, arguments); };
+    const deps = () => {
+      const gm = g.$gameMap;
+      if (gm.__deps) return gm.__deps;
+      const d = { sw: Object.create(null), va: Object.create(null), ok: false };
+      if (g.$dataMap && g.$dataMap.events) {
+        for (const ev of g.$dataMap.events) {
+          if (!ev) continue;
+          for (const pg of ev.pages) {
+            const c = pg.conditions;
+            if (c.switch1Valid) d.sw[c.switch1Id] = true;
+            if (c.switch2Valid) d.sw[c.switch2Id] = true;
+            if (c.variableValid) d.va[c.variableId] = true;
+          }
+        }
+        for (const ce of g.$dataCommonEvents) if (ce) d.sw[ce.switchId] = true;       // trigger switch (cheap superset)
+        d.ok = true;
+      }
+      return (gm.__deps = d);
+    };
+    for (const [cls, kind] of [[g.Game_Variables, "va"], [g.Game_Switches, "sw"], [g.Game_SelfSwitches, null]]) {
+      const proto = cls.prototype, setValue = proto.setValue, onChange = proto.onChange;
+      proto.setValue = function (id) {
+        this.__id = id; this.__before = kind === "va" ? this._data[id] : !!this._data[id];
+        try { return setValue.apply(this, arguments); } finally { this.__id = undefined; }
+      };
+      proto.onChange = function () {
+        const id = this.__id;
+        if (id !== undefined) {
+          const now = kind === "va" ? this._data[id] : !!this._data[id];
+          if (now === this.__before) return;                                       // same value: nothing to re-evaluate
+          g.__stateVer++;                                                          // idle-parallel cache key (see 7)
+          if (g.__curIt) g.__curIt.__wl.push(this, id, this.__before);             // a tracked run really changed state
+          if (kind && g.$gameMap) { const d = deps(); if (d.ok && !d[kind][id]) return; }   // nobody on this map reads it
+        }
+        return onChange.apply(this, arguments);
+      };
+    }
+  }
+
+  // 2. Game_Map.isAnyEventStarting scans every event, and is asked ~10 times per update. The answer is cached
+  //    for the duration of one update and invalidated whenever an event starts or clears its flag.
+  {
+    const GM = g.Game_Map.prototype, any = GM.isAnyEventStarting, update = GM.update;
+    GM.isAnyEventStarting = function () { return this.__starting !== undefined ? this.__starting : (this.__starting = any.apply(this, arguments)); };
+    GM.update = function () { this.__starting = undefined; return update.apply(this, arguments); };
+    const GE = g.Game_Event.prototype, start = GE.start, clear = GE.clearStartingFlag;
+    GE.start = function () { const r = start.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
+    GE.clearStartingFlag = function () { const r = clear.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
+  }
+
+  // 3. Sprite_Character.update only has an effect when something it mirrors has changed. A sprite is skipped when
+  //    (a) it is far off screen (re-checked every 4th frame; the margin is wider than anything can travel in 4
+  //    frames), or (b) its character's state, the camera and animation/balloon activity are all exactly as at
+  //    the last full update. (b) is a dozen plain property reads against ~25 interpreted calls.
+  {
+    const SC = g.Sprite_Character.prototype, update = SC.update;
+    SC.update = function () {
+      if (this.__off && (Graphics.frameCount & 3) !== 0) return;
+      const c = this._character, gm = g.$gameMap;
+      if (c && !this._animationSprites.length && !this._balloonSprite && !c._animationId && !c._balloonId &&
+          this.__dx === gm._displayX && this.__dy === gm._displayY && this.__rx === c._realX && this.__ry === c._realY &&
+          this.__dir === c._direction && this.__pat === c._pattern && this.__op === c._opacity && this.__bt === c._blendType &&
+          this.__cn === c._characterName && this.__ci === c._characterIndex && this.__tid === c._tileId &&
+          this.__jc === c._jumpCount && this.__sid === gm._tilesetId) return;
+      update.apply(this, arguments);
+      if (c) {
+        this.__dx = gm._displayX; this.__dy = gm._displayY; this.__rx = c._realX; this.__ry = c._realY;
+        this.__dir = c._direction; this.__pat = c._pattern; this.__op = c._opacity; this.__bt = c._blendType;
+        this.__cn = c._characterName; this.__ci = c._characterIndex; this.__tid = c._tileId; this.__jc = c._jumpCount; this.__sid = gm._tilesetId;
+      }
+      this.__off = this.x < -128 || this.x > Graphics.width + 128 || this.y < -192 || this.y > Graphics.height + 128;
+    };
+  }
+
+  // 3b. An idle character (not moving, not jumping, no step animation, resting on its original pattern, animation
+  //     counter at 0) changes nothing in Game_CharacterBase.update except _stopCount. 156 events per update
+  //     made that ~8 interpreted calls each; the exact same state change is now one comparison chain.
+  {
+    const CB = g.Game_CharacterBase.prototype, update = CB.update;
+    CB.update = function () {
+      if (this._realX === this._x && this._realY === this._y && this._jumpCount <= 0 && !this._stepAnime &&
+          this._animationCount === 0 && this._pattern === this._originalPattern) {
+        this._stopCount++;
+        return;
+      }
+      return update.apply(this, arguments);
+    };
+  }
+
+  // 4. Game_Interpreter.executeCommand builds 'command' + code as a fresh string for every command; cache the
+  //    names. Only replaced when it is the stock implementation (a plugin that wrapped it keeps working).
+  {
+    const GI = g.Game_Interpreter.prototype, src = String(GI.executeCommand);
+    if (src.indexOf("'command' + command.code") >= 0 && src.length < 500) {
+      const names = [];
+      // commands whose execution has no effect beyond reading switches/variables: end of list, comments,
+      // else/end-of-branch markers (a conditional branch on switch/variable/self switch is handled inline)
+      // $gameActors.actor(N).setCharacterImage('name', i) (script) and Change Actor Graphic (322) as comparable specs
+      const IMG = /^\$gameActors\.actor\((\d+)\)\.setCharacterImage\('([^']*)',\s*(\d+)\);?\s*$/;
+      const FACE = /^\$gameActors\.actor\((\d+)\)\.setFaceImage\('([^']*)',\s*(\d+)\);?\s*$/;
+      const BATT = /^\$gameActors\.actor\((\d+)\)\.setBattlerImage\('([^']*)'\);?\s*$/;
+      const imgSpec = (c, next) => {
+        if (c.__spec !== undefined) return next && next.code === 655 ? null : c.__spec;
+        let sp = null;
+        if (c.code === 322) sp = [322, c.parameters[0], c.parameters[1], c.parameters[2], c.parameters[3], c.parameters[4], c.parameters[5]];
+        else {
+          const t = c.parameters[0]; let m;
+          if ((m = IMG.exec(t))) sp = [355, +m[1], m[2], +m[3]];
+          else if ((m = FACE.exec(t))) sp = [901, +m[1], m[2], +m[3]];
+          else if ((m = BATT.exec(t))) sp = [902, +m[1], m[2]];
+          else if (/^\$gamePlayer\.refresh\(\);?\s*$/.test(t)) sp = [900, 0];
+        }
+        c.__spec = sp;
+        return next && next.code === 655 ? null : sp;
+      };
+      const imgEq = (sp) => {
+        if (sp[0] === 900) {                                        // Game_Player.refresh would re-set images that are already right
+          const l = g.$gameParty.leader(), p = g.$gamePlayer;
+          if (p._characterName !== (l ? l.characterName() : "") || p._characterIndex !== (l ? l.characterIndex() : 0)) return false;
+          const fl = p._followers._data;
+          for (let i = 0; i < fl.length; i++) {
+            const f = fl[i], a = f.actor(), n = f.isVisible() ? a.characterName() : "", x = f.isVisible() ? a.characterIndex() : 0;
+            if (f._characterName !== n || f._characterIndex !== x) return false;
+          }
+          return true;
+        }
+        const a = g.$gameActors.actor(sp[1]);
+        if (!a) return false;
+        if (sp[0] === 355) return a._characterName === sp[2] && a._characterIndex === sp[3];
+        if (sp[0] === 902) return a._battlerName === sp[2];
+        if (sp[0] === 901) return a._faceName === sp[2] && a._faceIndex === sp[3];
+        return a._characterName === sp[2] && a._characterIndex === sp[3] && a._faceName === sp[4] && a._faceIndex === sp[5] && a._battlerName === sp[6];
+      };
+      g.__imgEq = imgEq;
+      const PURE = new Uint8Array(1000);
+      for (const c of [0, 108, 408, 411, 412, 112, 413, 113, 115, 118, 119, 121, 123]) PURE[c] = 1;
+      g.__PURE = PURE;
+      GI.executeCommand = function () {
+        const command = this.currentCommand();
+        if (command) {
+          this._params = command.parameters;
+          this._indent = command.indent;
+          const code = command.code, name = names[code] || (names[code] = "command" + code), f = this[name];
+          let spec;
+          if (this.__pure) {            // see 7: which commands leave the next identical run a no-op
+            const p = command.parameters, t = p[0];
+            if (PURE[code] === 1 || (code === 111 && (t <= 2 || t === 4 || (t >= 7 && t <= 10))) || (code === 122 && p[3] <= 1) || code === 117) {
+            } else if (code === 230 && t <= 120) { (this.__root || this).__waited = true;
+            } else if (code === 111 && t === 11 && g.__rec) {
+              g.__rec.push(3, p[1], Input.isPressed(p[1]));                       // a button condition: remember its state
+            } else if (code === 122 && p[3] === 3 && p[4] === 5 && g.__rec) {
+              g.__rec.push(4, [this, p[5], p[6]], this.gameDataOperand(5, p[5], p[6]));   // character x/y/direction operand
+            } else if ((code === 355 || code === 322) && g.__rec && (spec = imgSpec(command, this._list[this._index + 1]))) {
+              // an actor-image setter whose target already has that image does nothing: skip it, depend on the image
+              if (!imgEq(spec)) { this.__pure = false; if (this.__root) this.__root.__pure = false; }
+              else { g.__rec.push(5, spec, true); this._index++; return true; }
+            } else { this.__pure = false; if (this.__root) this.__root.__pure = false; }
+          }
+          if (typeof f === "function") { if (!f.call(this)) return false; }
+          this._index++;
+        } else {
+          this.terminate();
+        }
+        return true;
+      };
+    }
+  }
+
+  // A child interpreter (common event call) belongs to its parent's idle-cache run: its impure commands count.
+  {
+    const GI = g.Game_Interpreter.prototype, sc = GI.setupChild;
+    GI.setupChild = function () {
+      const r = sc.apply(this, arguments), c = this._childInterpreter;
+      if (c) { c.__pure = !!this.__pure; c.__root = this.__root || this; }
+      return r;
+    };
+  }
+
+  // 7. Idle parallel events. ~60 parallel/common-event interpreters are restarted every frame; most evaluate a
+  //    switch/variable condition, find it false and finish having changed nothing, identically every frame.
+  //    When a list's previous run executed only pure commands (see PURE) and no switch/variable/self switch
+  //    has changed since (g.__stateVer), the next run would be the same no-op, so setup+run are skipped. Any
+  //    state change, a different page/list, or any impure command (wait, write, script, text, plugin command)
+  //    brings the normal path back. Exactly equivalent for lists of conditional branches on switches/variables.
+  //  Conditions on actors, gold and items (the bulk of F&H's common events) read party/actor state, so those
+  //  mutators bump g.__stateVer too; skipped runs are also re-verified every 60 frames as a safety net for any
+  //  plugin path that changes such state without going through them.
+  {
+    const bump = (proto, names) => { for (const n of names) { const f = proto[n]; if (typeof f === "function") proto[n] = function () { g.__actVer++; return f.apply(this, arguments); }; } };
+    bump(g.Game_BattlerBase.prototype, ["refresh", "clearStates", "addNewState", "eraseState"]);
+    bump(g.Game_Actor.prototype, ["setName", "changeClass", "learnSkill", "forgetSkill", "changeEquip", "forceChangeEquip", "discardEquip", "initEquips", "clearEquipments", "optimizeEquipments", "setup", "releaseUnequippableItems"]);
+    bump(g.Game_Party.prototype, ["gainItem", "gainGold", "loseGold", "addActor", "removeActor", "setupStartingMembers", "initialize"]);
+  }
+  {
+    // The variables/switches/self switches a pure run actually read are recorded with the values it saw; the run
+    // is skipped while every one of them still has that value (so a counter nobody here reads costs nothing).
+    for (const [cls, sw] of [[g.Game_Variables, 1], [g.Game_Switches, 0], [g.Game_SelfSwitches, 2]]) {
+      const proto = cls.prototype, value = proto.value;
+      proto.value = function (id) {
+        const v = value.apply(this, arguments);
+        if (g.__rec) {                                                  // not a dependency if this run wrote it first
+          const wl = g.__curIt.__wl;
+          for (let j = 0; j < wl.length; j += 3) if (wl[j] === this && wl[j + 1] === id) return v;
+          g.__rec.push(sw, id, v);
+        }
+        return v;
+      };
+    }
+    const same = (r) => {
+      const V = g.$gameVariables, S = g.$gameSwitches, SS = g.$gameSelfSwitches;
+      for (let i = 0; i < r.length; i += 3) {
+        const k = r[i], id = r[i + 1], v = r[i + 2];
+        if (k === 1 ? (V._data[id] || 0) !== v : k === 0 ? !!S._data[id] !== v : k === 2 ? (SS._data[id] ? true : false) !== v :
+            k === 3 ? Input.isPressed(id) !== v : k === 5 ? g.__imgEq(id) !== v : id[0].gameDataOperand(5, id[1], id[2]) !== v) return false;
+      }
+      return true;
+    };
+    // Writes that cancel out (CE 49 zeroes variable 34 and re-counts the party into it) leave state as it was;
+    // only valid when no wait ran in between, so nothing could have observed the transient values.
+    const netNoop = (wl) => {
+      for (let i = 0; i < wl.length; i += 3) {
+        const st = wl[i], id = wl[i + 1], b = wl[i + 2], d = st._data;
+        let dup = false;
+        for (let j = 0; j < i; j += 3) if (wl[j] === st && wl[j + 1] === id) { dup = true; break; }
+        if (dup) continue;                                     // only the value before the first write counts
+        if (st instanceof g.Game_Variables ? (d[id] || 0) !== (b || 0) : !!d[id] !== !!b) return false;
+      }
+      return true;
+    };
+    const tracked = (it, list, setupFn) => {
+      if (!it.isRunning()) {
+        if (!list) return setupFn();                                  // nothing to run: stock behaviour
+        if (it.__idleList === list && it.__idleAct === g.__actVer && nx.now() - it.__idleF < 1000 && same(it.__idleRec)) return;
+        g.__rec = it.__r0 = [];
+        g.__curIt = it;
+        setupFn();
+        it.__pure = true; it.__wl = []; it.__waited = false; it.__a0 = g.__actVer; it.__l0 = list; it.__root = null;
+      } else if (it.__pure) { g.__rec = it.__r0; g.__curIt = it; }
+      it.update();
+      g.__rec = null; g.__curIt = null;
+      if (it.__l0 && !it.isRunning()) {
+        if (it.__pure && g.__actVer === it.__a0 && (it.__wl.length === 0 || (!it.__waited && netNoop(it.__wl)))) {
+          it.__idleList = it.__l0; it.__idleAct = it.__a0; it.__idleF = nx.now(); it.__idleRec = it.__r0;
+        } else it.__idleList = null;
+        it.__l0 = null;
+      }
+    };
+    const GE = g.Game_Event.prototype, upd = GE.updateParallel;
+    if (String(upd).length < 300) GE.updateParallel = function () {
+      const it = this._interpreter;
+      if (!it) return;
+      tracked(it, this.list(), () => it.setup(this.list(), this._eventId));
+    };
+    const GC = g.Game_CommonEvent.prototype, cupd = GC.update;
+    if (String(cupd).length < 300) GC.update = function () {
+      const it = this._interpreter;
+      if (!it) return;
+      tracked(it, this.list(), () => it.setup(this.list()));
+    };
+  }
+
+  // 5. Catch-up cap. When a logic update costs more than 1/60 s MV runs more updates per frame to catch up
+  //    (up to 15), which makes the frame even slower: a death spiral that took one map to ~1 fps. At most 2
+  //    updates per frame now; a machine that cannot keep up runs the game slower instead of freezing.
+  {
+    const SM = g.SceneManager, main = SM.updateMain, scene = SM.updateScene, MAX = 2;
+    SM.updateMain = function () { this.__n = 0; return main.apply(this, arguments); };
+    SM.updateScene = function () {
+      if (++this.__n >= MAX) this._accumulator = this._deltaTime;       // the loop subtracts one step: no debt carried over
+      return scene.apply(this, arguments);
+    };
+  }
+
   // Load shedding for TerraxLighting. The plugin repaints a screen-sized mask every logic update, the single
   // biggest per-frame cost in lit maps. When ticks run over budget it repaints every 2nd (or 3rd) update:
   // the previous mask stays on screen (and is not re-uploaded), and lights lag by at most a frame or two.
@@ -117,6 +404,21 @@
     nx.log("audio sources active: " + (g.__audioStats ? g.__audioStats() : "n/a") + "  BGM=" + (AudioManager._currentBgm ? AudioManager._currentBgm.name : "-"));
     g.__dump(SceneManager._scene, 3, "");
   };
+
+  // Performance reporter: every 5 s, the average tick cost and logic updates per tick since the last report, with
+  // the current map. Cost per logic update = avg tick / updates per tick. This is what the device runs are read from.
+  {
+    let ticks = 0, tickMs = 0, updates = 0, last = nx.now(), worst = 0;
+    const tick = g.__tick, scene = g.SceneManager.updateScene;
+    g.SceneManager.updateScene = function () { updates++; return scene.apply(this, arguments); };
+    g.__tick = function (t) { const a = nx.now(); tick(t); const d = nx.now() - a; ticks++; tickMs += d; if (d > worst) worst = d; };
+    g.setInterval(() => {
+      if (!ticks) return;
+      const map = g.$gameMap && g.SceneManager._scene && g.SceneManager._scene.constructor.name === "Scene_Map" ? " map " + g.$gameMap.mapId() : "";
+      nx.log("[perf]" + map + " " + ticks + " ticks, avg " + (tickMs / ticks).toFixed(1) + " ms, worst " + worst.toFixed(0) + " ms, " + (updates / ticks).toFixed(2) + " updates/tick => " + (tickMs / Math.max(1, updates)).toFixed(1) + " ms per update");
+      ticks = 0; tickMs = 0; updates = 0; worst = 0;
+    }, 5000);
+  }
 
   // progress report once a second: which scene, and how long since boot
   let last = "";

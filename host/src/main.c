@@ -13,6 +13,7 @@
 
 #include "audio_mix.h"
 #include "audio_out.h"
+#include "js_alloc.h"
 #include "js_canvas.h"
 #include "js_gl.h"
 #include "nx_common.h"
@@ -113,7 +114,7 @@ static void worker(void *arg) {
     (void)arg;
     if (!egl_start()) { g_quit = 1; return; }
 
-    JSRuntime *rt = JS_NewRuntime();
+    JSRuntime *rt = JS_NewRuntime2(js_fast_malloc_functions(), NULL);       /* pool allocator: see js_alloc.h */
     JS_SetMaxStackSize(rt, 8u << 20);
     JSContext *ctx = JS_NewContext(rt);
 

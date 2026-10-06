@@ -27,9 +27,9 @@ FONT ?= $(WWW)/fonts/Eczar-Regular.ttf
 VORBIS := $(addprefix third_party/vorbis/lib/,mdct smallft block envelope window lsp lpc analysis synthesis psy info floor1 floor0 res0 mapping0 registry codebook sharedbook lookup bitrate vorbisfile)
 OGG    := third_party/ogg/src/bitwise third_party/ogg/src/framing
 QJS_C  := $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa.c
-HOST_C := host/src/nx_common.c host/src/js_canvas.c host/src/audio_mix.c $(addsuffix .c,$(VORBIS) $(OGG))
+HOST_C := host/src/nx_common.c host/src/js_canvas.c host/src/audio_mix.c host/src/js_alloc.c $(addsuffix .c,$(VORBIS) $(OGG))
 HOST_CF := -std=gnu11 -O2 -g -w -I$(QJS) -Ithird_party/imgui -Ithird_party/stb -Ithird_party/vorbis/include -Ithird_party/vorbis/lib -Ithird_party/ogg/include -D_GNU_SOURCE
-HOST_DEPS := $(HOST_C) host/src/js_canvas.h host/src/audio_mix.h host/src/nx_common.h
+HOST_DEPS := $(HOST_C) host/src/js_canvas.h host/src/audio_mix.h host/src/nx_common.h host/src/js_alloc.h
 
 build/canvas_host: tests/canvas_host.c $(HOST_DEPS)
 	@mkdir -p build
