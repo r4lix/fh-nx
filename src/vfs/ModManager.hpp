@@ -40,7 +40,7 @@ public:
     // Returns the number of mods found. Folders without a usable mod.json land in errors().
     size_t scan(const std::string& modsDir);
 
-    // mods.ini: a "[mods]" section of "<id>=<0|1>" lines, in load order. Missing ids are
+    // mods.ini: an optional "[general]" section (active=0|1) and a "[mods]" section of "<id>=<0|1>" lines, in load order. Missing ids are
     // dropped, new mods are appended disabled.
     void loadConfig(const std::string& iniPath);
     bool saveConfig(const std::string& iniPath) const;
@@ -53,6 +53,15 @@ public:
     bool setEnabled(const std::string& id, bool on);
     bool move(size_t index, int delta);   // swaps with the neighbour in that direction
 
+    // Master switch (the "Mods active" checkbox): off means a vanilla run, nothing below
+    // returns any mod content. Per-mod enabled flags are kept so turning it back on restores them.
+    bool active() const { return active_; }
+    void setActive(bool on) { active_ = on; }
+
+    // Set order and enabled flags in one go. `order` lists mod ids, first = lowest priority;
+    // ids not in `order` keep their relative order after it, unknown ids are ignored.
+    void apply(const std::vector<std::pair<std::string, bool>>& order);
+
     std::vector<std::string> enabledDirs() const;         // for Vfs::setMods
     std::vector<PluginEntry> extraPlugins() const;        // appended to the base plugin list
     std::vector<ParamOverride> paramOverrides() const;    // enabled mods' overrides, load order
@@ -61,4 +70,5 @@ public:
 private:
     std::vector<Mod> mods_;
     std::vector<std::string> errors_;
+    bool active_ = true;
 };

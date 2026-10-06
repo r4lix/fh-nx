@@ -119,13 +119,18 @@ void ModManager::loadConfig(const std::string& iniPath) {
     std::vector<std::pair<std::string, bool>> order;
     std::istringstream in(text);
     std::string line;
-    bool inMods = false;
+    bool inMods = false, inGeneral = false;
     while (std::getline(in, line)) {
         while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
         if (line.empty() || line[0] == ';' || line[0] == '#') continue;
-        if (line[0] == '[') { inMods = line == "[mods]"; continue; }
+        if (line[0] == '[') { inMods = line == "[mods]"; inGeneral = line == "[general]"; continue; }
         size_t eq = line.find('=');
-        if (!inMods || eq == std::string::npos) continue;
+        if (eq == std::string::npos) continue;
+        if (inGeneral) {
+            if (line.compare(0, eq, "active") == 0) active_ = line.substr(eq + 1) != "0";
+            continue;
+        }
+        if (!inMods) continue;
         order.emplace_back(line.substr(0, eq), line.substr(eq + 1) == "1");
     }
 
@@ -148,7 +153,7 @@ bool ModManager::saveConfig(const std::string& iniPath) const {
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (!f) return false;
-        f << "[mods]\n";
+        f << "[general]\nactive=" << (active_ ? '1' : '0') << "\n\n[mods]\n";
         for (const Mod& m : mods_) f << m.id << '=' << (m.enabled ? '1' : '0') << '\n';
         if (!f) return false;
     }
@@ -176,14 +181,29 @@ bool ModManager::move(size_t index, int delta) {
     return true;
 }
 
+void ModManager::apply(const std::vector<std::pair<std::string, bool>>& order) {
+    std::vector<Mod> sorted;
+    for (const auto& [id, on] : order) {
+        auto it = std::find_if(mods_.begin(), mods_.end(), [&](const Mod& m) { return m.id == id; });
+        if (it == mods_.end()) continue;
+        it->enabled = on;
+        sorted.push_back(std::move(*it));
+        mods_.erase(it);
+    }
+    for (Mod& m : mods_) sorted.push_back(std::move(m));
+    mods_ = std::move(sorted);
+}
+
 std::vector<std::string> ModManager::enabledDirs() const {
     std::vector<std::string> out;
+    if (!active_) return out;
     for (const Mod& m : mods_) if (m.enabled) out.push_back(m.dir);
     return out;
 }
 
 std::vector<PluginEntry> ModManager::extraPlugins() const {
     std::vector<PluginEntry> out;
+    if (!active_) return out;
     for (const Mod& m : mods_)
         if (m.enabled) out.insert(out.end(), m.plugins.begin(), m.plugins.end());
     return out;
@@ -191,6 +211,7 @@ std::vector<PluginEntry> ModManager::extraPlugins() const {
 
 std::vector<ParamOverride> ModManager::paramOverrides() const {
     std::vector<ParamOverride> out;
+    if (!active_) return out;
     for (const Mod& m : mods_)
         if (m.enabled) out.insert(out.end(), m.paramOverrides.begin(), m.paramOverrides.end());
     return out;

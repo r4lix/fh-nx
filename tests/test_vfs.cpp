@@ -124,13 +124,28 @@ int main() {
     CHECK(mm.extraPlugins().size() == 2);
     mm.setEnabled("cheat", false);
 
+    // --- master switch and apply()
+    mm.setEnabled("cheat", true);
+    mm.setActive(false);
+    CHECK(mm.enabledDirs().empty() && mm.extraPlugins().empty() && mm.paramOverrides().empty());
+    mm.setActive(true);
+    CHECK(!mm.enabledDirs().empty() && mm.extraPlugins().size() == 2);
+    mm.apply({{"mapfix", false}, {"cheat", true}});
+    CHECK(mm.mods()[0].id == "mapfix" && !mm.mods()[0].enabled);
+    CHECK(mm.mods()[1].id == "cheat" && mm.mods()[1].enabled);
+    CHECK(mm.mods().size() == 3);                         // hdart kept, after the listed ones
+    mm.apply({{"nope", true}});
+    CHECK(mm.mods().size() == 3);
+    mm.setEnabled("cheat", false);
+    mm.setActive(false);
+
     // --- ini round trip keeps order, state, and picks up new mods disabled
     fs::path ini = root / "config/mods.ini";
     CHECK(mm.saveConfig(ini.string()));
     ModManager again;
     again.scan(mods.string());
     again.loadConfig(ini.string());
-    CHECK(again.mods().size() == 3);
+    CHECK(again.mods().size() == 3 && !again.active());
     for (size_t i = 0; i < 3; i++) {
         CHECK(again.mods()[i].id == mm.mods()[i].id);
         CHECK(again.mods()[i].enabled == mm.mods()[i].enabled);
