@@ -177,7 +177,11 @@
       const imgSpec = (c, next) => {
         if (c.__spec !== undefined) return next && next.code === 655 ? null : c.__spec;
         let sp = null;
-        if (c.code === 322) sp = [322, c.parameters[0], c.parameters[1], c.parameters[2], c.parameters[3], c.parameters[4], c.parameters[5]];
+        if (c.code === 356) {                                       // plugin commands that are idempotent
+          const t = c.parameters[0]; let m;
+          if (t === "DisableDashing" || t === "EnableDashing") sp = [903, t === "DisableDashing"];
+          else if ((m = /^eraseFilter\s+(\S+)\s*$/i.exec(t))) sp = [904, m[1]];
+        } else if (c.code === 322) sp = [322, c.parameters[0], c.parameters[1], c.parameters[2], c.parameters[3], c.parameters[4], c.parameters[5]];
         else {
           const t = c.parameters[0]; let m;
           if ((m = IMG.exec(t))) sp = [355, +m[1], m[2], +m[3]];
@@ -189,6 +193,8 @@
         return next && next.code === 655 ? null : sp;
       };
       const imgEq = (sp) => {
+        if (sp[0] === 903) return g.$gameSystem.isDashDisabled() === sp[1];
+        if (sp[0] === 904) return !g.$gameMap._filterConArr || !g.$gameMap._filterConArr.get(sp[1]);
         if (sp[0] === 900) {                                        // Game_Player.refresh would re-set images that are already right
           const l = g.$gameParty.leader(), p = g.$gamePlayer;
           if (p._characterName !== (l ? l.characterName() : "") || p._characterIndex !== (l ? l.characterIndex() : 0)) return false;
@@ -225,7 +231,7 @@
               g.__rec.push(3, p[1], Input.isPressed(p[1]));                       // a button condition: remember its state
             } else if (code === 122 && p[3] === 3 && p[4] === 5 && g.__rec) {
               g.__rec.push(4, [this, p[5], p[6]], this.gameDataOperand(5, p[5], p[6]));   // character x/y/direction operand
-            } else if ((code === 355 || code === 322) && g.__rec && (spec = imgSpec(command, this._list[this._index + 1]))) {
+            } else if ((code === 355 || code === 322 || code === 356) && g.__rec && (spec = imgSpec(command, this._list[this._index + 1]))) {
               // an actor-image setter whose target already has that image does nothing: skip it, depend on the image
               if (!imgEq(spec)) { this.__pure = false; if (this.__root) this.__root.__pure = false; }
               else { g.__rec.push(5, spec, true); this._index++; return true; }
