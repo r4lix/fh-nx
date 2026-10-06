@@ -480,7 +480,168 @@ static void fill_path(Ctx *c, const Sub *subs, int ns, const Paint *p) {
     fill_polys(c, subs, ns, paint_row, &pr);
 }
 
-/* Axis-aligned rectangle, device space. Integer edges take the span fast path. */
+/* ---- axis-aligned rectangle fast paths -----------------------------------------------------------
+ * Bitmap.fillRect and TerraxLighting's per-frame screen-sized mask make rectangle fills the hottest
+ * thing the 2D canvas does. A solid fill that replaces pixels is a 32-bit store per pixel; the rest still
+ * avoids the per-pixel clip/alpha/dispatch work of put_px. */
+
+static inline void lerp_over(uint8_t *d, RGBA s, int a) {            /* d opaque */
+    d[0] = (uint8_t)(d[0] + ((s.r - d[0]) * a + (s.r >= d[0] ? 127 : -127)) / 255);
+    d[1] = (uint8_t)(d[1] + ((s.g - d[1]) * a + (s.g >= d[1] ? 127 : -127)) / 255);
+    d[2] = (uint8_t)(d[2] + ((s.b - d[2]) * a + (s.b >= d[2] ? 127 : -127)) / 255);
+}
+
+/* For a fixed colour and alpha, source-over onto an opaque pixel is three table lookups. */
+typedef struct { uint8_t t[3][256]; int ready; } OverLut;
+static void over_lut_build(OverLut *l, RGBA s, int a) {
+    const int sc[3] = {s.r, s.g, s.b};
+    for (int k = 0; k < 3; k++)
+        for (int d = 0; d < 256; d++) l->t[k][d] = (uint8_t)(d + ((sc[k] - d) * a + (sc[k] >= d ? 127 : -127)) / 255);
+    l->ready = 1;
+}
+
+/* a: source alpha after globalAlpha (0..255). lut: optional, built once per rectangle. */
+static void span_solid(Ctx *c, int y, int x0, int x1, RGBA s, int a, OverLut *lut) {
+    int n = x1 - x0, comp = c->st.comp;
+    if (n <= 0) return;
+    uint8_t *row = c->s->b->px + ((size_t)y * c->s->w + x0) * 4;
+    const uint8_t *clip = c->st.clip ? c->st.clip->m + (size_t)y * c->s->w + x0 : NULL;
+    if (!clip) {
+        if (comp == COPY || (comp == SRC_OVER && a >= 255)) {
+            uint32_t px = (uint32_t)s.r | ((uint32_t)s.g << 8) | ((uint32_t)s.b << 16) | ((uint32_t)(comp == COPY ? a : 255) << 24);
+            uint32_t *d = (uint32_t *)row;
+            for (int i = 0; i < n; i++) d[i] = px;
+            return;
+        }
+        if (comp == SRC_OVER) {
+            if (a <= 0) return;
+            if (lut && !lut->ready) over_lut_build(lut, s, a);
+            for (int i = 0; i < n; i++, row += 4) {
+                if (row[3] == 255 && lut) { row[0] = lut->t[0][row[0]]; row[1] = lut->t[1][row[1]]; row[2] = lut->t[2][row[2]]; }
+                else if (row[3] == 255) lerp_over(row, s, a);
+                else blend_px(row, s, a, comp);
+            }
+            return;
+        }
+        if (comp == LIGHTER && a > 0) {
+            int ar = mul255(s.r, a), ag = mul255(s.g, a), ab = mul255(s.b, a);
+            for (int i = 0; i < n; i++, row += 4) {
+                if (row[3] == 255) {
+                    int v;
+                    v = row[0] + ar; row[0] = v > 255 ? 255 : v;
+                    v = row[1] + ag; row[1] = v > 255 ? 255 : v;
+                    v = row[2] + ab; row[2] = v > 255 ? 255 : v;
+                } else blend_px(row, s, a, comp);
+            }
+            return;
+        }
+    }
+    for (int i = 0; i < n; i++, row += 4)                       /* clip mask, or a mode without a fast path */
+        blend_px(row, s, clip ? mul255(a, clip[i]) : a, comp);
+}
+
+static void rect_gradient(Ctx *c, int ix0, int iy0, int ix1, int iy1, const Paint *p) {
+    Gradient *g = p->g;
+    if (!g->lut_ok) grad_build(g);
+    PaintRow pr;
+    paint_inverse(c, p, &pr);
+    const double *inv = pr.inv;
+    int ga = global_alpha255(&c->st), comp = c->st.comp;
+    int skip_black = comp == LIGHTER;                           /* adding black changes nothing */
+    int concentric = g->radial && g->x0 == g->x1 && g->y0 == g->y1 && g->r1 != g->r0;
+    float invdr = concentric ? (float)(1.0 / (g->r1 - g->r0)) : 0;
+    int linear = !g->radial;
+    double dx = g->x1 - g->x0, dy = g->y1 - g->y0, l2 = dx * dx + dy * dy;
+    /* Beyond r1 a concentric gradient is a flat colour. When that colour changes nothing (black added,
+     * or fully transparent) only the disc needs visiting, which skips a fifth of a light's bounding box
+     * and all of its corners. Valid for scale+translate transforms (no rotation/skew). */
+    /* The additive light (TerraxLighting's workhorse) gets its own loop: distance -> table index in a tight
+     * float pass the compiler can vectorise, then one table lookup and a saturating add per pixel. */
+    int light_fast = concentric && comp == LIGHTER && !c->st.clip && inv[1] == 0 && inv[2] == 0;
+    uint8_t addt[3][256];
+    if (light_fast)
+        for (int k = 0; k < 256; k++) {
+            int a = mul255(g->lut[k].a, ga);
+            addt[0][k] = (uint8_t)mul255(g->lut[k].r, a);
+            addt[1][k] = (uint8_t)mul255(g->lut[k].g, a);
+            addt[2][k] = (uint8_t)mul255(g->lut[k].b, a);
+        }
+    static uint8_t idxbuf[16384];
+    int disc_only = concentric && inv[1] == 0 && inv[2] == 0 && inv[0] != 0 &&
+                    (g->lut[255].a == 0 || (skip_black && !(g->lut[255].r | g->lut[255].g | g->lut[255].b)));
+    for (int y = iy0; y < iy1; y++) {
+        int xa = ix0, xb = ix1;
+        double py = y + 0.5;
+        if (disc_only) {
+            double qy = inv[3] * py + inv[5] - g->y0;
+            double rem = g->r1 * g->r1 - qy * qy;
+            if (rem < 0) continue;
+            double hw = sqrt(rem);                                        /* user-space half width of the disc on this row */
+            double ua = g->x0 - hw - inv[4], ub = g->x0 + hw - inv[4];    /* solve inv0*(x+0.5) + inv4 = user x */
+            double fa = ua / inv[0] - 0.5, fb = ub / inv[0] - 0.5;
+            if (fa > fb) { double t = fa; fa = fb; fb = t; }
+            xa = (int)floor(fa); xb = (int)ceil(fb) + 1;
+            if (xa < ix0) xa = ix0;
+            if (xb > ix1) xb = ix1;
+            if (xb <= xa) continue;
+        }
+        uint8_t *row = c->s->b->px + ((size_t)y * c->s->w + xa) * 4;
+        const uint8_t *clip = c->st.clip ? c->st.clip->m + (size_t)y * c->s->w + xa : NULL;
+        double ux = inv[0] * (xa + 0.5) + inv[2] * py + inv[4], uy = inv[1] * (xa + 0.5) + inv[3] * py + inv[5];
+        if (light_fast && xb - xa <= 16384) {
+            int n = xb - xa;
+            float qx0 = (float)(ux - g->x0), qy = (float)(uy - g->y0), step = (float)inv[0], r0 = (float)g->r0, qy2 = qy * qy;
+            for (int i = 0; i < n; i++) {                           /* pass 1: float only, vectorisable */
+                float qx = qx0 + step * (float)i;
+                float t = (sqrtf(qx * qx + qy2) - r0) * invdr;
+                t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+                idxbuf[i] = (uint8_t)(int)(t * 255.0f + 0.5f);
+            }
+            for (int i = 0; i < n; i++, row += 4) {                 /* pass 2: lookup + saturating add */
+                int k = idxbuf[i];
+                int ar = addt[0][k], ag = addt[1][k], ab = addt[2][k];
+                if (!(ar | ag | ab)) continue;
+                if (row[3] == 255) {
+                    int v;
+                    v = row[0] + ar; row[0] = v > 255 ? 255 : v;
+                    v = row[1] + ag; row[1] = v > 255 ? 255 : v;
+                    v = row[2] + ab; row[2] = v > 255 ? 255 : v;
+                } else {
+                    RGBA col = g->lut[k];
+                    blend_px(row, col, mul255(col.a, ga), comp);
+                }
+            }
+            continue;
+        }
+        for (int x = xa; x < xb; x++, row += 4, ux += inv[0], uy += inv[1]) {
+            RGBA col;
+            if (concentric) {
+                float qx = (float)(ux - g->x0), qy = (float)(uy - g->y0);
+                float t = (sqrtf(qx * qx + qy * qy) - (float)g->r0) * invdr;
+                col = g->lut[t <= 0 ? 0 : t >= 1 ? 255 : (int)(t * 255 + 0.5f)];
+            } else if (linear) {
+                double t = l2 > 0 ? ((ux - g->x0) * dx + (uy - g->y0) * dy) / l2 : 0;
+                col = g->lut[t <= 0 ? 0 : t >= 1 ? 255 : (int)(t * 255 + 0.5)];
+            } else {
+                col = paint_at(p, inv, x + 0.5, py);
+            }
+            if (col.a == 0) continue;
+            if (skip_black && !(col.r | col.g | col.b)) continue;
+            int a = mul255(col.a, ga);
+            if (clip) a = mul255(a, clip[x - xa]);
+            if (comp == LIGHTER && row[3] == 255) {              /* the additive light: no function call per pixel */
+                int v;
+                v = row[0] + mul255(col.r, a); row[0] = v > 255 ? 255 : v;
+                v = row[1] + mul255(col.g, a); row[1] = v > 255 ? 255 : v;
+                v = row[2] + mul255(col.b, a); row[2] = v > 255 ? 255 : v;
+            } else {
+                blend_px(row, col, a, comp);
+            }
+        }
+    }
+}
+
+/* Axis-aligned rectangle, device space. Integer edges take the span fast paths. */
 static void fill_rect_dev(Ctx *c, double x0, double y0, double x1, double y1, const Paint *p) {
     if (x1 < x0) { double t = x0; x0 = x1; x1 = t; }
     if (y1 < y0) { double t = y0; y0 = y1; y1 = t; }
@@ -490,11 +651,10 @@ static void fill_rect_dev(Ctx *c, double x0, double y0, double x1, double y1, co
         if (iy0 < 0) iy0 = 0;
         if (ix1 > c->s->w) ix1 = c->s->w;
         if (iy1 > c->s->h) iy1 = c->s->h;
-        PaintRow pr;
-        paint_inverse(c, p, &pr);
-        for (int y = iy0; y < iy1; y++)
-            for (int x = ix0; x < ix1; x++)
-                put_px(c, x, y, p->g ? paint_at(p, pr.inv, x + 0.5, y + 0.5) : p->c, 255);
+        if (p->g) { rect_gradient(c, ix0, iy0, ix1, iy1, p); return; }
+        int a = mul255(p->c.a, global_alpha255(&c->st));
+        OverLut lut = {{{0}}, 0};
+        for (int y = iy0; y < iy1; y++) span_solid(c, y, ix0, ix1, p->c, a, &lut);
         return;
     }
     Pt pts[4] = {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}};
@@ -1080,6 +1240,8 @@ static JSValue c2d_drawImage(JSContext *ctx, JSValueConst self, int argc, JSValu
 
     int identity = fabs(full[0] - 1) < 1e-9 && fabs(full[3] - 1) < 1e-9 && full[1] == 0 && full[2] == 0 &&
                    fabs(full[4] - lrint(full[4])) < 1e-9 && fabs(full[5] - lrint(full[5])) < 1e-9;
+    int gaw = global_alpha255(&c->st);
+    int fast_copy = identity && c->st.comp == SRC_OVER && !c->st.clip && gaw == 255;
     for (int y = y0; y < y1; y++) {
         for (int x = x0; x < x1; x++) {
             RGBA s;
@@ -1087,6 +1249,12 @@ static JSValue c2d_drawImage(JSContext *ctx, JSValueConst self, int argc, JSValu
                 int u = x - (int)lrint(full[4]), v = y - (int)lrint(full[5]);
                 if (u < 0 || v < 0 || u >= isw || v >= ish) continue;
                 const uint8_t *p = src->b->px + ((size_t)(isy + v) * src->w + isx + u) * 4;
+                if (fast_copy) {                                   /* plain over, no clip, full alpha: skip put_px's per-pixel work */
+                    if (p[3] == 255) { memcpy(c->s->b->px + ((size_t)y * c->s->w + x) * 4, p, 4); continue; }
+                    if (p[3] == 0) continue;
+                    blend_px(c->s->b->px + ((size_t)y * c->s->w + x) * 4, (RGBA){p[0], p[1], p[2], p[3]}, mul255(p[3], gaw), SRC_OVER);
+                    continue;
+                }
                 s = (RGBA){p[0], p[1], p[2], p[3]};
             } else {
                 double u = inv[0] * (x + 0.5) + inv[2] * (y + 0.5) + inv[4];

@@ -46,6 +46,7 @@
       if (t.repeat) t.due = now + t.ms; else timers = timers.filter((x) => x !== t);
       try { t.fn(...t.args); } catch (e) { log("timer error: " + e + (e && e.stack ? " | " + e.stack : "")); }
     }
+    if (g.__audioTick) g.__audioTick();
     const cbs = frameCbs;
     frameCbs = [];
     for (const cb of cbs) cb(now);
@@ -186,9 +187,21 @@
     };
     return el;
   };
+  // <video>: no decoder yet, so a movie "plays" instantly: it loads, plays and ends on the next tick. MV's
+  // interpreter waits on the ended event ("Play Movie" parks the event until it fires), so without this
+  // the game's intro movie would hang the opening forever on a black screen.
+  function videoElement() {
+    const v = element("video");
+    v.volume = 1; v.muted = false; v.videoWidth = 0; v.videoHeight = 0; v.currentTime = 0; v.duration = 0; v.paused = true;
+    v.onloadeddata = v.onended = v.onerror = null;
+    v.load = () => { g.setTimeout(() => { if (typeof v.onloadeddata === "function") v.onloadeddata({ target: v }); }, 0); };
+    v.play = () => { v.paused = false; g.setTimeout(() => { v.paused = true; if (typeof v.onended === "function") v.onended({ target: v }); }, 0); return Promise.resolve(); };
+    v.pause = () => { v.paused = true; };
+    return v;
+  }
   const head = element("head"), body = element("body");
   g.document = {
-    createElement: (tag) => (String(tag).toLowerCase() === "canvas" ? new Canvas() : element(tag)),
+    createElement: (tag) => { const t = String(tag).toLowerCase(); return t === "canvas" ? new Canvas() : t === "video" ? videoElement() : element(tag); },
     createTextNode: (t) => ({ textContent: t }),
     getElementsByTagName: (t) => nodeList(t === "head" ? [head] : t === "script" ? (scripts.length ? scripts.slice() : [{ src: "js/main.js" }]) : t === "body" ? [body] : []),
     getElementById: (id) => byId.get(id) || null,
@@ -267,17 +280,105 @@
     }
   };
 
-  // ---- audio: a silent AudioContext so WebAudio initialises; real playback comes later ------------
-  const param = () => ({ value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, cancelScheduledValues() {} });
-  const node = () => ({ gain: param(), connect() {}, disconnect() {}, frequency: param(), setPosition() {}, setOrientation() {}, panningModel: "", distanceModel: "" });
+  // ---- Web Audio over the native mixer ---------------------------------------------------------
+  // MV builds source -> gain -> panner -> master gain -> destination. A source node resolves that chain to
+  // (volume, pan) for its mixer voice; fades are AudioParam ramps evaluated against context time each frame.
+  class AudioParam {
+    constructor(ctx, v) { this._ctx = ctx; this._v = v; this._ramp = null; }
+    get value() {
+      if (this._ramp) {
+        const r = this._ramp, now = this._ctx.currentTime;
+        const f = r.t1 > r.t0 ? Math.min(1, Math.max(0, (now - r.t0) / (r.t1 - r.t0))) : 1;
+        const v = r.from + (r.to - r.from) * f;
+        if (f >= 1) { this._v = r.to; this._ramp = null; }
+        return v;
+      }
+      return this._v;
+    }
+    set value(x) { this._v = +x; this._ramp = null; }
+    setValueAtTime(x, t) { if (t <= this._ctx.currentTime + 1e-6) { this._v = +x; this._ramp = null; } return this; }
+    linearRampToValueAtTime(x, t) { this._ramp = { from: this.value, to: +x, t0: this._ctx.currentTime, t1: t }; return this; }
+    cancelScheduledValues() { if (this._ramp) { this._v = this.value; this._ramp = null; } return this; }
+  }
+  class AudioNode {
+    constructor(ctx) { this._ctx = ctx; this._to = null; }
+    connect(dest) { this._to = dest; return dest; }
+    disconnect() { this._to = null; }
+  }
+  class GainNode extends AudioNode { constructor(ctx) { super(ctx); this.gain = new AudioParam(ctx, 1); } }
+  class PannerNode extends AudioNode {
+    constructor(ctx) { super(ctx); this.panningModel = "equalpower"; this.distanceModel = "inverse"; this._x = 0; }
+    setPosition(x) { this._x = +x; }
+    setOrientation() {}
+  }
+  class DestinationNode extends AudioNode {}
+  const liveBuffers = new FinalizationRegistry((id) => nx.audio.release(id));   // free compressed bytes when MV drops the buffer
+
+  class AudioBufferSourceNode extends AudioNode {
+    constructor(ctx) {
+      super(ctx);
+      this.buffer = null; this.loop = false; this.loopStart = 0; this.loopEnd = 0; this.onended = null;
+      this.playbackRate = new AudioParam(ctx, 1);
+      this._voice = 0; this._last = "";
+    }
+    _resolve() {                                             // walk the graph to the destination
+      let vol = 1, pan = 0;
+      for (let n = this._to, i = 0; n && i < 16; n = n._to, i++) {
+        if (n instanceof GainNode) vol *= n.gain.value;
+        else if (n instanceof PannerNode) pan = n._x;
+      }
+      return [vol, this.playbackRate.value, pan];
+    }
+    start(when, offset) {
+      if (!this.buffer || this._voice) return;
+      const [vol, pitch, pan] = this._resolve();
+      this._voice = nx.audio.play(this.buffer._id, !!this.loop, this.loopStart, this.loopEnd, +offset || 0, vol, pitch, pan);
+      this._last = vol + "," + pitch + "," + pan;
+      if (this._voice) this._ctx._active.add(this);
+    }
+    stop() {
+      if (this._voice) nx.audio.stop(this._voice);
+      this._voice = 0;
+      this._ctx._active.delete(this);
+    }
+    _update() {
+      if (!nx.audio.isPlaying(this._voice)) {
+        this._voice = 0;
+        this._ctx._active.delete(this);
+        if (typeof this.onended === "function") this.onended({ target: this });
+        return;
+      }
+      const [vol, pitch, pan] = this._resolve(), key = vol + "," + pitch + "," + pan;
+      if (key !== this._last) { nx.audio.setParams(this._voice, vol, pitch, pan); this._last = key; }
+    }
+  }
+  const t0 = nx.now();
+  const contexts = [];
   g.AudioContext = g.webkitAudioContext = class AudioContext {
-    constructor() { this.currentTime = 0; this.sampleRate = 44100; this.state = "running"; this.destination = node(); this.listener = { setPosition() {}, setOrientation() {} }; }
-    createGain() { return node(); }
-    createPanner() { return node(); }
-    createBufferSource() { return Object.assign(node(), { buffer: null, loop: false, loopStart: 0, loopEnd: 0, playbackRate: param(), start() {}, stop() {}, onended: null }); }
-    decodeAudioData(buf, ok) { g.setTimeout(() => ok({ duration: 1, length: 44100, numberOfChannels: 2, sampleRate: 44100, getChannelData: () => new Float32Array(0) }), 0); }
+    constructor() {
+      this.sampleRate = 48000; this.state = "running"; this._active = new Set();
+      this.destination = new DestinationNode(this);
+      this.listener = { setPosition() {}, setOrientation() {} };
+      contexts.push(this);
+    }
+    get currentTime() { return (nx.now() - t0) / 1000; }
+    createGain() { return new GainNode(this); }
+    createPanner() { return new PannerNode(this); }
+    createBufferSource() { return new AudioBufferSourceNode(this); }
+    decodeAudioData(data, ok, err) {
+      const info = nx.audio.load(data);
+      const done = () => {
+        if (!info) { if (err) err(new Error("EncodingError")); return; }
+        const buf = { _id: info.id, duration: info.duration, length: info.length, sampleRate: info.rate, numberOfChannels: info.channels, getChannelData: () => new Float32Array(0) };
+        liveBuffers.register(buf, info.id);
+        if (ok) ok(buf);
+      };
+      g.setTimeout(done, 0);
+    }
     resume() { return Promise.resolve(); }
   };
+  g.__audioStats = () => contexts.map((c) => c._active.size).join("/");
+  g.__audioTick = () => { for (const c of contexts) for (const s of Array.from(c._active)) s._update(); };
   g.Audio = class Audio { constructor() { this.volume = 1; } addEventListener() {} play() {} pause() {} load() {} canPlayType() { return ""; } };
 
   g.FontFace = function () {};

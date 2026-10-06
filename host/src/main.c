@@ -11,6 +11,8 @@
 #include <GLES2/gl2.h>
 #include <switch.h>
 
+#include "audio_mix.h"
+#include "audio_out.h"
 #include "js_canvas.h"
 #include "js_gl.h"
 #include "nx_common.h"
@@ -124,6 +126,11 @@ static void worker(void *arg) {
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, HEIGHT));
     JS_SetPropertyStr(ctx, nx, "gl", js_gl_create(ctx, WIDTH, HEIGHT));
     js_canvas_init(ctx, nx);
+    js_audio_init(ctx, nx);
+    {
+        int arc = audio_out_start();
+        say("audio out: %s (rc=0x%x)\n", arc == 0 ? "started" : "FAILED", (unsigned)arc);
+    }
     JS_SetPropertyStr(ctx, g, "__nx", nx);
 
     const char *entry = BASE "/js/boot.js";
@@ -154,12 +161,14 @@ static void worker(void *arg) {
         if (spent < budget) svcSleepThread(armTicksToNs(budget - spent));
         if (++frames % 300 == 0) {
             double secs = (double)(armGetSystemTick() - t0) / armGetSystemTickFreq();
-            say("[host] %llu frames, %.1f fps, JS+GL %.2f ms/frame\n", (unsigned long long)frames, frames / secs,
-                (double)t_js * 1000.0 / armGetSystemTickFreq() / 300);
+            say("[host] %llu frames, %.1f fps, JS+GL %.2f ms/frame, audio played %.1f s\n", (unsigned long long)frames, frames / secs,
+                (double)t_js * 1000.0 / armGetSystemTickFreq() / 300, audio_out_played() / 48000.0);
             t_js = 0; t0 = armGetSystemTick(); frames = 0;
         }
     }
 
+    audio_out_stop();
+    audio_shutdown();
     JS_FreeValue(ctx, tick);
     JS_FreeValue(ctx, g);
     JS_FreeContext(ctx);

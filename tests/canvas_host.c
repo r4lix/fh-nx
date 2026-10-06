@@ -5,6 +5,8 @@
 #include <string.h>
 #include "quickjs.h"
 #include "../host/src/js_canvas.h"
+#include "../host/src/nx_common.h"
+#include "../host/src/audio_mix.h"
 
 static const char *g_outdir = ".";
 
@@ -53,7 +55,9 @@ int main(int argc, char **argv) {
     JS_SetPropertyStr(ctx, g, "print", JS_NewCFunction(ctx, js_print, "print", 1));
     JS_SetPropertyStr(ctx, nx, "writePPM", JS_NewCFunction(ctx, js_write_ppm, "writePPM", 4));
     JS_SetPropertyStr(ctx, nx, "fontPath", JS_NewString(ctx, argv[2]));
+    nx_common_init(ctx, nx, ".", NULL);
     js_canvas_init(ctx, nx);
+    js_audio_init(ctx, nx);
     JS_SetPropertyStr(ctx, g, "__nx", nx);
     FILE *f = fopen(argv[1], "rb");
     if (!f) { fprintf(stderr, "cannot open %s\n", argv[1]); return 2; }

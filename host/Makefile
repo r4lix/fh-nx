@@ -23,11 +23,21 @@ build/quickjs.o: $(QSRC)
 	$(CC) $(CFLAGS) -w -c $(QJS)/libregexp.c -o build/libregexp.o
 	$(CC) $(CFLAGS) -w -c $(QJS)/libunicode.c -o build/libunicode.o
 	$(CC) $(CFLAGS) -w -c $(QJS)/dtoa.c -o build/dtoa.o
-build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/gl_consts.inc
+VORBIS_SRC := $(addprefix ../third_party/vorbis/lib/,mdct smallft block envelope window lsp lpc analysis synthesis psy info floor1 floor0 res0 mapping0 registry codebook sharedbook lookup bitrate vorbisfile)
+OGG_SRC    := ../third_party/ogg/src/bitwise ../third_party/ogg/src/framing
+AUDIO_INC  := -I../third_party/vorbis/include -I../third_party/vorbis/lib -I../third_party/ogg/include
+THIRD_OBJ  := $(addprefix build/tp_,$(notdir $(VORBIS_SRC) $(OGG_SRC)))
+THIRD_OBJ  := $(addsuffix .o,$(THIRD_OBJ))
+# third-party code is compiled without warnings
+$(foreach f,$(VORBIS_SRC) $(OGG_SRC),$(eval build/tp_$(notdir $(f)).o: $(f).c ; @mkdir -p build ; $(CC) $(CFLAGS) $(AUDIO_INC) -w -c $$< -o $$@))
+
+# the rasteriser is float-heavy and self-contained: let the compiler vectorise it (never QuickJS: JS needs strict NaN/inf)
+build/js_canvas.o: CFLAGS += -O3 -ffast-math
+build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/audio_mix.h src/audio_out.h src/gl_consts.inc
 	@mkdir -p build
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(AUDIO_INC) -c $< -o $@
 # linked with g++: Mesa's EGL is C++
-build/fh-nx.elf: build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/quickjs.o build/fh-nx.nacp
-	$(CXX) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
+build/fh-nx.elf: build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o $(THIRD_OBJ) build/quickjs.o build/fh-nx.nacp
+	$(CXX) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o $(THIRD_OBJ) build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
 clean:
 	rm -rf build

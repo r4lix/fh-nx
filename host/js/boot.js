@@ -22,6 +22,12 @@
   g.Graphics.printError = (name, message) => nx.log("MV ERROR: " + name + ": " + message);
   g.Graphics.printLoadingError = (url) => nx.log("MV LOADING ERROR: " + url);
 
+  // Port patches: plugins that work around browser limits the native host does not have.
+  //  - DSE-AudioLagFix streams BGM through HTML5 <audio> elements; the native mixer already streams from
+  //    compressed data, so the stock WebAudio path is used instead.
+  const DISABLED = ["DSE-AudioLagFix"];
+  for (const p of g.$plugins) if (DISABLED.includes(p.name) && p.status) { p.status = false; nx.log("port patch: plugin " + p.name + " disabled"); }
+
   __loadScript("js/main.js");                         // PluginManager.setup($plugins); window.onload = ...
   step("plugins loaded");
   g.window.onload();                                  // SceneManager.run(Scene_Boot)
@@ -40,6 +46,7 @@
   g.__dumpScene = function () {
     nx.log("Graphics " + Graphics._width + "x" + Graphics._height + " canvas " + (Graphics._canvas && Graphics._canvas.width) + "x" + (Graphics._canvas && Graphics._canvas.height) +
       " box " + Graphics.boxWidth + "x" + Graphics.boxHeight + " renderer " + (Graphics._renderer && Graphics._renderer.width) + "x" + (Graphics._renderer && Graphics._renderer.height));
+    nx.log("audio sources active: " + (g.__audioStats ? g.__audioStats() : "n/a") + "  BGM=" + (AudioManager._currentBgm ? AudioManager._currentBgm.name : "-"));
     g.__dump(SceneManager._scene, 3, "");
   };
 

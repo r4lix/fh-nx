@@ -439,6 +439,12 @@ static const uint8_t *source_pixels(JSContext *ctx, JSValueConst src, int *w, in
     JS_FreeValue(ctx, dv);   /* the buffer stays alive through `src` */
     if (!p || *w <= 0 || *h <= 0 || len < (size_t)*w * *h * 4) return NULL;
     if (!g_flip_y && !g_premultiply) return p;
+    if (!g_flip_y) {                              /* premultiplying opaque pixels changes nothing: skip the copy */
+        const uint32_t *px = (const uint32_t *)p;
+        size_t n = (size_t)*w * *h, i = 0;
+        while (i < n && (px[i] & 0xff000000u) == 0xff000000u) i++;
+        if (i == n) return p;
+    }
     uint8_t *out = malloc((size_t)*w * *h * 4);
     if (!out) return NULL;
     for (int y = 0; y < *h; y++) {

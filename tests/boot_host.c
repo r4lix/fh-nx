@@ -9,6 +9,7 @@
 #include "quickjs.h"
 #include "../host/src/js_canvas.h"
 #include "../host/src/nx_common.h"
+#include "../host/src/audio_mix.h"
 
 static void log_line(const char *s) { printf("%s\n", s); fflush(stdout); }
 
@@ -30,7 +31,7 @@ static int run_file(JSContext *ctx, const char *path) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 4) { fprintf(stderr, "usage: boot_host <www> <repo> <seconds> [save dir]\n"); return 2; }
+    if (argc < 4) { fprintf(stderr, "usage: boot_host <www> <repo> <seconds> [save dir] [extra.js]\n"); return 2; }
     const char *www = argv[1], *repo = argv[2];
     double seconds = atof(argv[3]);
     const char *save = argc > 4 ? argv[4] : "build/save";
@@ -44,6 +45,7 @@ int main(int argc, char **argv) {
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, 1280));
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, 720));
     js_canvas_init(ctx, nx);
+    js_audio_init(ctx, nx);
     JS_SetPropertyStr(ctx, g, "__nx", nx);
 
     char path[1024];
@@ -56,6 +58,9 @@ int main(int argc, char **argv) {
     snprintf(path, sizeof path, "%s/host/js/boot.js", repo);
     if (!run_file(ctx, path)) return 1;
 
+    if (argc > 5) {                                  /* optional extra script: profiling hooks, scripted input */
+        if (!run_file(ctx, argv[5])) return 1;
+    }
     JSValue tick = JS_GetPropertyStr(ctx, g, "__tick");
     struct timespec t0, now;
     clock_gettime(CLOCK_MONOTONIC, &t0);
