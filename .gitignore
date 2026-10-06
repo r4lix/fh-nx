@@ -1,3 +1,4 @@
 manifest-*-local.json
 build/
 mods-local/
+dist/
