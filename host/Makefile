@@ -23,11 +23,11 @@ build/quickjs.o: $(QSRC)
 	$(CC) $(CFLAGS) -w -c $(QJS)/libregexp.c -o build/libregexp.o
 	$(CC) $(CFLAGS) -w -c $(QJS)/libunicode.c -o build/libunicode.o
 	$(CC) $(CFLAGS) -w -c $(QJS)/dtoa.c -o build/dtoa.o
-build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/gl_consts.inc
+build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/gl_consts.inc
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 # linked with g++: Mesa's EGL is C++
-build/fh-nx.elf: build/main.o build/js_gl.o build/js_canvas.o build/quickjs.o build/fh-nx.nacp
-	$(CXX) build/main.o build/js_gl.o build/js_canvas.o build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
+build/fh-nx.elf: build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/quickjs.o build/fh-nx.nacp
+	$(CXX) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
 clean:
 	rm -rf build

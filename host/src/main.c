@@ -1,7 +1,7 @@
-/* fh-nx native host skeleton: EGL/GLES2 window, QuickJS runtime, WebGL1 bindings, a browser shim.
- * Runs js/env.js then js/demo.js from sdmc:/switch/fh-nx/ against the game's www/ tree. Everything
- * that touches JS or GL happens on one worker thread (QuickJS wants a big stack, and the GL context
- * must stay on the thread that made it current); the main thread only watches the pad. */
+/* fh-nx native host: EGL/GLES2 window, QuickJS runtime, WebGL1 + Canvas 2D + file bindings, a browser
+ * shim. Runs js/env.js then js/boot.js from sdmc:/switch/fh-nx/ against the game's www/ tree.
+ * Everything that touches JS or GL happens on one worker thread (QuickJS wants a big stack, and the
+ * GL context must stay on the thread that made it current); the main thread polls the pad. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +13,7 @@
 
 #include "js_canvas.h"
 #include "js_gl.h"
+#include "nx_common.h"
 #include "quickjs.h"
 
 #define BASE "sdmc:/switch/fh-nx"
@@ -21,6 +22,10 @@
 
 static FILE *g_log;
 static volatile int g_quit;
+
+/* pad state, written by the main thread, read by the worker through nx.pad() */
+static volatile u64 g_buttons;
+static volatile int g_stick[4];
 
 static void say(const char *fmt, ...) {
     va_list a;
@@ -34,6 +39,7 @@ static void say(const char *fmt, ...) {
         fflush(g_log);
     }
 }
+static void log_line(const char *s) { say("%s\n", s); }
 
 /* ---- EGL ---------------------------------------------------------------------------------------- */
 
@@ -71,93 +77,30 @@ static void egl_stop(void) {
     eglTerminate(s_display);
 }
 
-/* ---- the __nx object --------------------------------------------------------------------------- */
+/* ---- the platform half of __nx ------------------------------------------------------------------ */
 
-static char *read_all(const char *path, size_t *len) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *buf = malloc(n > 0 ? n + 1 : 1);
-    if (!buf) { fclose(f); return NULL; }
-    size_t got = fread(buf, 1, n, f);
-    fclose(f);
-    buf[got] = 0;
-    *len = got;
-    return buf;
-}
-
-static void dump_exception(JSContext *ctx) {
-    JSValue ex = JS_GetException(ctx);
-    const char *s = JS_ToCString(ctx, ex);
-    say("JS EXCEPTION: %s\n", s ? s : "?");
-    if (s) JS_FreeCString(ctx, s);
-    JSValue st = JS_GetPropertyStr(ctx, ex, "stack");
-    if (!JS_IsUndefined(st)) {
-        const char *ss = JS_ToCString(ctx, st);
-        if (ss) { say("%s\n", ss); JS_FreeCString(ctx, ss); }
-    }
-    JS_FreeValue(ctx, st);
-    JS_FreeValue(ctx, ex);
-}
-
-static JSValue nx_log(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-    const char *s = argc ? JS_ToCString(ctx, argv[0]) : NULL;
-    say("%s\n", s ? s : "");
-    if (s) JS_FreeCString(ctx, s);
-    return JS_UNDEFINED;
-}
-
-static JSValue nx_now(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-    return JS_NewFloat64(ctx, (double)armTicksToNs(armGetSystemTick()) / 1e6);
-}
-
-static JSValue nx_read_file(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-    const char *path = JS_ToCString(ctx, argv[0]);
-    if (!path) return JS_EXCEPTION;
-    size_t len;
-    char *buf = read_all(path, &len);
-    JS_FreeCString(ctx, path);
-    if (!buf) return JS_NULL;
-    JSValue v = JS_NewStringLen(ctx, buf, len);
-    free(buf);
-    return v;
-}
-
-static JSValue nx_read_binary(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-    const char *path = JS_ToCString(ctx, argv[0]);
-    if (!path) return JS_EXCEPTION;
-    size_t len;
-    char *buf = read_all(path, &len);
-    JS_FreeCString(ctx, path);
-    if (!buf) return JS_NULL;
-    JSValue v = JS_NewArrayBufferCopy(ctx, (const uint8_t *)buf, len);
-    free(buf);
-    return v;
-}
-
-static JSValue nx_load_script(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-    const char *path = JS_ToCString(ctx, argv[0]);
-    if (!path) return JS_EXCEPTION;
-    size_t len;
-    char *src = read_all(path, &len);
-    if (!src) { say("cannot read %s\n", path); JS_FreeCString(ctx, path); return JS_FALSE; }
-    JSValue r = JS_Eval(ctx, src, len, path, JS_EVAL_TYPE_GLOBAL);
-    free(src);
-    JS_FreeCString(ctx, path);
-    if (JS_IsException(r)) { dump_exception(ctx); return JS_FALSE; }
-    JS_FreeValue(ctx, r);
-    return JS_TRUE;
+static JSValue nx_pad(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    u64 b = g_buttons;
+    JSValue a = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)(b & 0xffffffffu)));
+    JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, (double)(b >> 32)));
+    for (int i = 0; i < 4; i++) JS_SetPropertyUint32(ctx, a, 2 + i, JS_NewInt32(ctx, g_stick[i]));
+    return a;
 }
 
 static int run_file(JSContext *ctx, const char *path) {
-    size_t len;
-    char *src = read_all(path, &len);
-    if (!src) { say("missing %s\n", path); return 0; }
-    JSValue r = JS_Eval(ctx, src, len, path, JS_EVAL_TYPE_GLOBAL);
+    FILE *f = fopen(path, "rb");
+    if (!f) { say("missing %s\n", path); return 0; }
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *src = malloc(n + 1);
+    size_t got = fread(src, 1, n, f);
+    src[got] = 0;
+    fclose(f);
+    JSValue r = JS_Eval(ctx, src, got, path, JS_EVAL_TYPE_GLOBAL);
     free(src);
-    if (JS_IsException(r)) { dump_exception(ctx); return 0; }
+    if (JS_IsException(r)) { nx_dump_exception(ctx); return 0; }
     JS_FreeValue(ctx, r);
     return 1;
 }
@@ -174,19 +117,17 @@ static void worker(void *arg) {
 
     JSValue g = JS_GetGlobalObject(ctx);
     JSValue nx = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, nx, "log", JS_NewCFunction(ctx, nx_log, "log", 1));
-    JS_SetPropertyStr(ctx, nx, "now", JS_NewCFunction(ctx, nx_now, "now", 0));
-    JS_SetPropertyStr(ctx, nx, "readFile", JS_NewCFunction(ctx, nx_read_file, "readFile", 1));
-    JS_SetPropertyStr(ctx, nx, "readBinary", JS_NewCFunction(ctx, nx_read_binary, "readBinary", 1));
-    JS_SetPropertyStr(ctx, nx, "loadScript", JS_NewCFunction(ctx, nx_load_script, "loadScript", 1));
-    JS_SetPropertyStr(ctx, nx, "root", JS_NewString(ctx, BASE "/www"));
+    nx_common_init(ctx, nx, BASE "/www", log_line);
+    JS_SetPropertyStr(ctx, nx, "saveDir", JS_NewString(ctx, BASE "/save"));
+    JS_SetPropertyStr(ctx, nx, "pad", JS_NewCFunction(ctx, nx_pad, "pad", 0));
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, WIDTH));
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, HEIGHT));
     JS_SetPropertyStr(ctx, nx, "gl", js_gl_create(ctx, WIDTH, HEIGHT));
     js_canvas_init(ctx, nx);
     JS_SetPropertyStr(ctx, g, "__nx", nx);
 
-    int ok = run_file(ctx, BASE "/js/env.js") && run_file(ctx, BASE "/js/demo.js");
+    const char *entry = BASE "/js/boot.js";
+    int ok = run_file(ctx, BASE "/js/env.js") && run_file(ctx, entry);
     JSValue tick = JS_GetPropertyStr(ctx, g, "__tick");
     int errors = 0;
     u64 frames = 0, t_js = 0;
@@ -198,8 +139,8 @@ static void worker(void *arg) {
         JSValue r = JS_Call(ctx, tick, JS_UNDEFINED, 1, &arg);
         JS_FreeValue(ctx, arg);
         if (JS_IsException(r)) {
-            dump_exception(ctx);
-            if (++errors >= 5) { say("too many JS errors, stopping\n"); break; }
+            nx_dump_exception(ctx);
+            if (++errors >= 50) { say("too many JS errors, stopping\n"); break; }
         }
         JS_FreeValue(ctx, r);
         JSContext *pc;
@@ -207,10 +148,10 @@ static void worker(void *arg) {
         t_js += armGetSystemTick() - a;
 
         eglSwapBuffers(s_display, s_surface);
-        if (++frames % 120 == 0) {
+        if (++frames % 300 == 0) {
             double secs = (double)(armGetSystemTick() - t0) / armGetSystemTickFreq();
             say("[host] %llu frames, %.1f fps, JS+GL %.2f ms/frame\n", (unsigned long long)frames, frames / secs,
-                (double)t_js * 1000.0 / armGetSystemTickFreq() / 120);
+                (double)t_js * 1000.0 / armGetSystemTickFreq() / 300);
             t_js = 0; t0 = armGetSystemTick(); frames = 0;
         }
     }
@@ -225,7 +166,7 @@ static void worker(void *arg) {
 
 int main(void) {
     g_log = fopen(BASE "/log.txt", "w");
-    say("fh-nx host skeleton\n");
+    say("fh-nx host\n");
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     PadState pad;
     padInitializeDefault(&pad);
@@ -238,8 +179,12 @@ int main(void) {
     threadStart(&th);
     while (appletMainLoop() && !g_quit) {
         padUpdate(&pad);
-        if (padGetButtonsDown(&pad) & HidNpadButton_Plus) g_quit = 1;
-        svcSleepThread(16000000ULL);
+        u64 held = padGetButtons(&pad);
+        g_buttons = held;
+        HidAnalogStickState l = padGetStickPos(&pad, 0), r = padGetStickPos(&pad, 1);
+        g_stick[0] = l.x; g_stick[1] = l.y; g_stick[2] = r.x; g_stick[3] = r.y;
+        if (padGetButtonsDown(&pad) & HidNpadButton_Plus) g_quit = 1;       /* dev: + quits */
+        svcSleepThread(4000000ULL);
     }
     g_quit = 1;
     threadWaitForExit(&th);

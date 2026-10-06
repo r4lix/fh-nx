@@ -1,7 +1,6 @@
-// Browser shim for the MV engine on the native host. The native side provides `__nx`
-// (log, now, readFile, readBinary, loadScript, gl, width, height); this file builds the DOM-ish
-// globals PIXI and rpg_core expect on top of it. Canvas 2D is not implemented yet: getContext('2d')
-// returns a no-op context so scripts that only touch it at load time keep running.
+// Browser shim for the MV engine on the native host. The native side provides `__nx` (see
+// nx_common.h, js_gl.c, js_canvas.c, main.c); this file builds the DOM-ish globals PIXI and
+// rpg_core expect on top of it. Only what MV actually touches is implemented.
 (function (g) {
   "use strict";
   const nx = g.__nx;
@@ -10,7 +9,23 @@
   g.global = undefined;
 
   const log = (...a) => nx.log(a.map(String).join(" "));
-  g.console = { log, info: log, warn: log, error: log, debug: log };
+  g.console = { log, info: log, warn: log, error: log, debug: log, trace() {} };
+
+
+  // ---- V8 compatibility: legacy RegExp.$1..$9 / lastMatch (YEP and many MV plugins read note tags
+  // through them). Recorded on every successful exec, which match/test/replace/split all go through. ----
+  (function () {
+    let last = null;
+    const origExec = RegExp.prototype.exec;
+    RegExp.prototype.exec = function (str) {
+      const m = origExec.call(this, str);
+      if (m) last = m;
+      return m;
+    };
+    for (let i = 1; i <= 9; i++) Object.defineProperty(RegExp, "$" + i, { get() { return last && last[i] !== undefined ? last[i] : ""; }, configurable: true });
+    Object.defineProperty(RegExp, "lastMatch", { get() { return last ? last[0] : ""; }, configurable: true });
+    Object.defineProperty(RegExp, "$&", { get() { return last ? last[0] : ""; }, configurable: true });
+  })();
 
   // ---- timers and animation frames, pumped from native once per frame via __tick ---------------
   let timers = [], nextTimer = 1, frameCbs = [];
@@ -28,7 +43,7 @@
     const due = timers.filter((t) => t.due <= now);
     for (const t of due) {
       if (t.repeat) t.due = now + t.ms; else timers = timers.filter((x) => x !== t);
-      t.fn(...t.args);
+      try { t.fn(...t.args); } catch (e) { log("timer error: " + e + (e && e.stack ? " | " + e.stack : "")); }
     }
     const cbs = frameCbs;
     frameCbs = [];
@@ -36,16 +51,27 @@
   };
   Object.defineProperty(g, "performance", { value: { now: () => nx.now() }, configurable: true, writable: true });
 
-  // ---- canvas / image: pixels live in native surfaces; the 2D context is the native rasteriser -----
+  // ---- canvas ---------------------------------------------------------------------------------
+  // Pixels live in native surfaces; the 2D context is the native rasteriser. The first canvas asked
+  // for a WebGL context is "the screen": its size becomes the logical size the GL viewport maps from.
+  let screenCanvas = null;
   class Canvas {
-    constructor() { this._s = nx.createSurface(300, 150); this._w = 300; this._h = 150; this._ab = null; this._ctx = null; this.style = {}; }
+    constructor() { this._s = nx.createSurface(300, 150); this._w = 300; this._h = 150; this._ab = null; this._ctx = null; this.style = {}; this.id = ""; }
     get width() { return this._w; }
-    set width(v) { this._w = v | 0; nx.surfaceResize(this._s, this._w, this._h); this._ab = null; }
+    set width(v) { this._w = v | 0; this._resize(); }
     get height() { return this._h; }
-    set height(v) { this._h = v | 0; nx.surfaceResize(this._s, this._w, this._h); this._ab = null; }
+    set height(v) { this._h = v | 0; this._resize(); }
+    _resize() {
+      if (this === screenCanvas) { if (nx.gl.setLogicalSize) nx.gl.setLogicalSize(this._w, this._h); return; }   // the screen has no pixel store
+      nx.surfaceResize(this._s, this._w, this._h);
+      this._ab = null;
+    }
     get _data() { return this._ab || (this._ab = nx.surfaceBuffer(this._s)); }   // live RGBA pixels, read by texImage2D
     getContext(type) {
-      if (type === "webgl" || type === "experimental-webgl") return nx.gl;
+      if (type === "webgl" || type === "experimental-webgl") {
+        if (!screenCanvas) { screenCanvas = this; this._resize(); }
+        return nx.gl;
+      }
       if (type === "2d") return this._ctx || (this._ctx = nx.createContext(this._s, this));
       return null;
     }
@@ -53,8 +79,10 @@
     removeEventListener() {}
     getBoundingClientRect() { return { left: 0, top: 0, width: this._w, height: this._h }; }
     toDataURL() { return ""; }
+    appendChild() {}
   }
   g.HTMLCanvasElement = Canvas;
+
   // ---- Blob / object URLs / Image: MV's Decrypter turns an encrypted .rpgmvp into a Blob URL, then
   // sets it as an Image's src, so Image loading handles both blob: URLs and plain file paths ----------
   const blobs = new Map();
@@ -109,17 +137,11 @@
   g.WebGLRenderingContext = function () {};
   g.ImageData = function () {};
 
-  // ---- document / navigator --------------------------------------------------------------------
-  const element = (tag) => ({ sheet: tag === "style" ? { insertRule: (r) => parseFontFace(r, "") } : undefined, tagName: String(tag).toUpperCase(), style: {}, children: [], appendChild(c) { this.children.push(c); return c; },
-    removeChild() {}, addEventListener() {}, removeEventListener() {}, setAttribute() {}, getAttribute() { return null; } });
+  // ---- fonts: @font-face from stylesheets (gamefont.css) and Graphics.loadFont's insertRule ------
   const fontFamilies = new Set();
-  function addFontFace(family, url) {
-    if (nx.registerFont(family, url)) fontFamilies.add(family.toLowerCase());
-  }
-  // @font-face rules, from a stylesheet file (gamefont.css) or Graphics.loadFont's insertRule
   function parseFontFace(rule, baseDir) {
     const fam = /font-family:\s*["']?([^;"']+?)["']?\s*;/.exec(rule), url = /url\(\s*["']?([^)"']+?)["']?\s*\)/.exec(rule);
-    if (fam && url) addFontFace(fam[1].trim(), nx.root + "/" + baseDir + url[1]);
+    if (fam && url && nx.registerFont(fam[1].trim(), nx.root + "/" + baseDir + url[1])) fontFamilies.add(fam[1].trim().toLowerCase());
   }
   g.__registerCss = function (rel) {
     const css = nx.readFile(nx.root + "/" + rel);
@@ -127,36 +149,107 @@
     const dir = rel.replace(/[^/]*$/, "");
     for (const m of css.matchAll(/@font-face\s*\{([^}]*)\}/g)) parseFontFace(m[1], dir);
   };
+  const fonts = {
+    load: () => Promise.resolve(), add() {},
+    check: (spec) => { const m = /[\d.]+px\s+(.+)$/.exec(String(spec)); return !!m && m[1].split(",").some((f) => fontFamilies.has(f.trim().replace(/["']/g, "").toLowerCase())); },
+  };
+  fonts.ready = Promise.resolve(fonts);                    // MV keeps the resolved value and calls .check() on it
+
+  // ---- document / elements ---------------------------------------------------------------------
+  const byId = new Map();
+  function nodeList(arr) { arr.item = (i) => arr[i] || null; return arr; }
+  function loadScriptElement(el) {
+    try { g.__loadScript(el.src); } catch (e) { log("script load failed: " + el.src + ": " + e); if (el.onerror) el.onerror({ target: el }); return; }
+    g.setTimeout(() => { if (el.onload) el.onload({ target: el }); }, 0);
+  }
+  const scripts = [];
+  const element = (tag) => {
+    const t = String(tag).toLowerCase();
+    const el = {
+      tagName: t.toUpperCase(), style: {}, children: [], textContent: "", src: "", id: "",
+      sheet: t === "style" ? { insertRule: (r) => parseFontFace(r, "") } : undefined,
+      appendChild(c) {
+        this.children.push(c);
+        if (c && c.tagName === "SCRIPT" && c.src) { scripts.push(c); loadScriptElement(c); }
+        return c;
+      },
+      insertBefore(c) { return this.appendChild(c); },
+      getElementsByTagName() { return nodeList([]); },
+      removeChild() {}, remove() {},
+      addEventListener() {}, removeEventListener() {}, setAttribute() {}, getAttribute() { return null; },
+      canPlayType(type) { return /ogg/.test(type) ? "probably" : ""; },   // MV picks .ogg over .m4a when this says yes; the game ships only .rpgmvo
+    };
+    return el;
+  };
+  const head = element("head"), body = element("body");
   g.document = {
-    createElement: (tag) => (tag === "canvas" ? new Canvas() : element(tag)),
+    createElement: (tag) => (String(tag).toLowerCase() === "canvas" ? new Canvas() : element(tag)),
     createTextNode: (t) => ({ textContent: t }),
-    getElementsByTagName: () => [element("head")],
-    body: element("body"), head: element("head"), documentElement: element("html"),
+    getElementsByTagName: (t) => nodeList(t === "head" ? [head] : t === "script" ? (scripts.length ? scripts.slice() : [{ src: "js/main.js" }]) : t === "body" ? [body] : []),
+    getElementById: (id) => byId.get(id) || null,
+    body, head, documentElement: element("html"),
     currentScript: { src: "" },
-    fonts: { ready: Promise.resolve(), load: () => Promise.resolve(), add() {},
-      check: (spec) => { const m = /[\d.]+px\s+(.+)$/.exec(String(spec)); return !!m && m[1].split(",").some((f) => fontFamilies.has(f.trim().replace(/[\"']/g, "").toLowerCase())); } },
+    fonts,
     addEventListener() {}, removeEventListener() {}, visibilityState: "visible", title: "",
   };
-  Object.defineProperty(g, "navigator", { value: { userAgent: "Mozilla/5.0 (Nintendo Switch) NX", platform: "NX", language: "en",
-    getGamepads: () => [] }, configurable: true, writable: true });
+
+  // ---- location / navigator / gamepad ----------------------------------------------------------
+  g.location = { search: "", href: "file:///index.html", protocol: "file:", pathname: "/index.html", hash: "", host: "", reload() {} };
+
+  // The Switch pad as a "standard" gamepad, laid out by Nintendo semantics: A is OK, B is cancel,
+  // Y is dash, X is the menu, so MV's mapper (0 ok, 1 cancel, 2 shift, 3 menu) feels native.
+  const BIT = { A: 0, B: 1, X: 2, Y: 3, STICK_L: 4, STICK_R: 5, L: 6, R: 7, ZL: 8, ZR: 9, PLUS: 10, MINUS: 11, LEFT: 12, UP: 13, RIGHT: 14, DOWN: 15 };
+  const STD = [BIT.A, BIT.B, BIT.Y, BIT.X, BIT.L, BIT.R, BIT.ZL, BIT.ZR, BIT.MINUS, BIT.PLUS, BIT.STICK_L, BIT.STICK_R, BIT.UP, BIT.DOWN, BIT.LEFT, BIT.RIGHT];
+  const gamepad = { id: "Nintendo Switch", index: 0, connected: true, mapping: "standard", buttons: STD.map(() => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0] };
+  function getGamepads() {
+    if (!nx.pad) return [];
+    const p = nx.pad();
+    for (let i = 0; i < STD.length; i++) {
+      const bit = STD[i], on = ((p[0] >>> bit) & 1) === 1;
+      gamepad.buttons[i].pressed = on;
+      gamepad.buttons[i].value = on ? 1 : 0;
+    }
+    gamepad.axes[0] = p[2] / 32767; gamepad.axes[1] = -p[3] / 32767;      // libnx y is up-positive, the Gamepad API's is down
+    gamepad.axes[2] = p[4] / 32767; gamepad.axes[3] = -p[5] / 32767;
+    return [gamepad];
+  }
+  Object.defineProperty(g, "navigator", { value: { userAgent: "Mozilla/5.0 (Nintendo Switch) NX", platform: "NX", language: "en", getGamepads }, configurable: true, writable: true });
+
   g.addEventListener = g.removeEventListener = () => {};
+  g.getComputedStyle = () => ({});
+  g.close = g.open = () => {};
+  g.screen = { width: nx.width, height: nx.height };
   g.innerWidth = nx.width;
   g.innerHeight = nx.height;
   g.devicePixelRatio = 1;
 
-  const store = new Map();
-  g.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); },
-    removeItem: (k) => { store.delete(k); }, clear: () => store.clear() };
+  // ---- localStorage persisted to the SD card (MV's web-storage saves live here) ----------------
+  const cache = new Map();
+  const savePath = (k) => nx.saveDir + "/" + encodeURIComponent(k) + ".sav";
+  g.localStorage = {
+    getItem(k) {
+      k = String(k);
+      if (!cache.has(k)) cache.set(k, nx.readFile(savePath(k)));
+      return cache.get(k);
+    },
+    setItem(k, v) {
+      k = String(k); v = String(v);
+      if (!nx.writeFile(savePath(k), v)) throw new Error("localStorage: write failed for " + k);
+      cache.set(k, v);
+    },
+    removeItem(k) { k = String(k); nx.removeFile(savePath(k)); cache.set(k, null); },
+    clear() {},
+  };
 
   // ---- XMLHttpRequest over the native file reader (data/*.json etc.) ----------------------------
   g.XMLHttpRequest = class XMLHttpRequest {
-    constructor() { this.readyState = 0; this.status = 0; this.responseType = ""; this.response = null; this.responseText = ""; this._h = {}; }
+    constructor() { this.readyState = 0; this.status = 0; this.responseType = ""; this.response = null; this.responseText = ""; }
     open(method, url) { this._url = url; this.readyState = 1; }
     overrideMimeType() {}
     setRequestHeader() {}
     send() {
       g.setTimeout(() => {
-        const path = nx.root + "/" + this._url.replace(/^\.?\//, "");
+        const path = nx.root + "/" + decodeURIComponent(this._url.split("?")[0].replace(/^\.?\//, ""));
         const bin = this.responseType === "arraybuffer";
         const body = bin ? nx.readBinary(path) : nx.readFile(path);
         this.readyState = 4;
@@ -169,12 +262,24 @@
     }
   };
 
+  // ---- audio: a silent AudioContext so WebAudio initialises; real playback comes later ------------
+  const param = () => ({ value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, cancelScheduledValues() {} });
+  const node = () => ({ gain: param(), connect() {}, disconnect() {}, frequency: param(), setPosition() {}, setOrientation() {}, panningModel: "", distanceModel: "" });
+  g.AudioContext = g.webkitAudioContext = class AudioContext {
+    constructor() { this.currentTime = 0; this.sampleRate = 44100; this.state = "running"; this.destination = node(); this.listener = { setPosition() {}, setOrientation() {} }; }
+    createGain() { return node(); }
+    createPanner() { return node(); }
+    createBufferSource() { return Object.assign(node(), { buffer: null, loop: false, loopStart: 0, loopEnd: 0, playbackRate: param(), start() {}, stop() {}, onended: null }); }
+    decodeAudioData(buf, ok) { g.setTimeout(() => ok({ duration: 1, length: 44100, numberOfChannels: 2, sampleRate: 44100, getChannelData: () => new Float32Array(0) }), 0); }
+    resume() { return Promise.resolve(); }
+  };
+  g.Audio = class Audio { constructor() { this.volume = 1; } addEventListener() {} play() {} pause() {} load() {} canPlayType() { return ""; } };
+
   g.FontFace = function () {};
 
   // ---- script loading ----------------------------------------------------------------------------
   g.__loadScript = function (rel) {
-    document.currentScript = { src: rel };
-    const ok = nx.loadScript(nx.root + "/" + rel);
-    if (!ok) throw new Error("cannot load " + rel);
+    g.document.currentScript = { src: rel };
+    if (nx.loadScript(nx.root + "/" + rel) === null) throw new Error("cannot load " + rel);
   };
 })(globalThis);

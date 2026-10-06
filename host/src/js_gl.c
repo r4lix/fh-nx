@@ -20,6 +20,21 @@
 static JSClassID gl_obj_class;
 static int g_flip_y, g_premultiply;
 
+/* The game renders at its own logical size (816x624 for stock MV); the screen is 1280x720. While the
+ * default framebuffer is bound, viewport and scissor are scaled to fit the logical size into the
+ * screen with black bars, instead of the browser's CSS stretch. Off-screen targets are untouched. */
+static int g_fb0 = 1, g_screen_w = 1280, g_screen_h = 720, g_log_w, g_log_h;
+static void map_rect(int *x, int *y, int *w, int *h) {
+    if (!g_fb0 || g_log_w <= 0 || g_log_h <= 0) return;
+    double s = (double)g_screen_w / g_log_w, sy = (double)g_screen_h / g_log_h;
+    if (sy < s) s = sy;
+    double ox = (g_screen_w - g_log_w * s) / 2, oy = (g_screen_h - g_log_h * s) / 2;
+    *x = (int)(ox + *x * s + 0.5);
+    *y = (int)(oy + *y * s + 0.5);
+    *w = (int)(*w * s + 0.5);
+    *h = (int)(*h * s + 0.5);
+}
+
 static const struct { const char *name; int value; } k_consts[] = {
 #include "gl_consts.inc"
 };
@@ -139,11 +154,14 @@ FN(depthFunc) { glDepthFunc(U(0)); return JS_UNDEFINED; }
 FN(disable) { glDisable(U(0)); return JS_UNDEFINED; }
 FN(enable) { glEnable(U(0)); return JS_UNDEFINED; }
 FN(frontFace) { glFrontFace(U(0)); return JS_UNDEFINED; }
-FN(scissor) { glScissor(I(0), I(1), I(2), I(3)); return JS_UNDEFINED; }
+FN(scissor) { int x = I(0), y = I(1), w = I(2), h = I(3); map_rect(&x, &y, &w, &h); glScissor(x, y, w, h); return JS_UNDEFINED; }
 FN(stencilFunc) { glStencilFunc(U(0), I(1), U(2)); return JS_UNDEFINED; }
 FN(stencilMask) { glStencilMask(U(0)); return JS_UNDEFINED; }
 FN(stencilOp) { glStencilOp(U(0), U(1), U(2)); return JS_UNDEFINED; }
-FN(viewport) { glViewport(I(0), I(1), I(2), I(3)); return JS_UNDEFINED; }
+FN(viewport) { int x = I(0), y = I(1), w = I(2), h = I(3); map_rect(&x, &y, &w, &h); glViewport(x, y, w, h); return JS_UNDEFINED; }
+FN(flush) { glFlush(); return JS_UNDEFINED; }
+FN(finish) { glFinish(); return JS_UNDEFINED; }
+FN(setLogicalSize) { g_log_w = I(0); g_log_h = I(1); return JS_UNDEFINED; }
 FN(getError) { return JS_NewInt32(ctx, glGetError()); }
 FN(isContextLost) { return JS_FALSE; }
 FN(getExtension) { return JS_NULL; }
@@ -173,7 +191,7 @@ FN(deleteTexture) { GLuint n = O(0); glDeleteTextures(1, &n); return JS_UNDEFINE
 FN(deleteProgram) { glDeleteProgram(O(0)); return JS_UNDEFINED; }
 FN(deleteShader) { glDeleteShader(O(0)); return JS_UNDEFINED; }
 FN(bindBuffer) { glBindBuffer(U(0), O(1)); return JS_UNDEFINED; }
-FN(bindFramebuffer) { glBindFramebuffer(U(0), O(1)); return JS_UNDEFINED; }
+FN(bindFramebuffer) { GLuint fb = O(1); g_fb0 = fb == 0; glBindFramebuffer(U(0), fb); return JS_UNDEFINED; }
 FN(bindRenderbuffer) { glBindRenderbuffer(U(0), O(1)); return JS_UNDEFINED; }
 FN(bindTexture) { glBindTexture(U(0), O(1)); return JS_UNDEFINED; }
 FN(framebufferTexture2D) { glFramebufferTexture2D(U(0), U(1), U(2), O(3), I(4)); return JS_UNDEFINED; }
@@ -467,7 +485,7 @@ static const struct {
     REG(clearColor,4), REG(clearStencil,1), REG(colorMask,4), REG(cullFace,1), REG(depthMask,1),
     REG(depthFunc,1), REG(disable,1), REG(enable,1), REG(frontFace,1), REG(scissor,4), REG(stencilFunc,3),
     REG(stencilMask,1), REG(stencilOp,3), REG(viewport,4), REG(getError,0), REG(isContextLost,0),
-    REG(getExtension,1), REG(pixelStorei,2),
+    REG(getExtension,1), REG(pixelStorei,2), REG(flush,0), REG(finish,0), REG(setLogicalSize,2),
     REG(createBuffer,0), REG(createFramebuffer,0), REG(createRenderbuffer,0), REG(createTexture,0),
     REG(createProgram,0), REG(createShader,1), REG(deleteBuffer,1), REG(deleteFramebuffer,1),
     REG(deleteRenderbuffer,1), REG(deleteTexture,1), REG(deleteProgram,1), REG(deleteShader,1),
@@ -490,6 +508,8 @@ static const struct {
 };
 
 JSValue js_gl_create(JSContext *ctx, int width, int height) {
+    g_screen_w = width;
+    g_screen_h = height;
     static int class_ready;
     if (!class_ready) {
         JS_NewClassID(JS_GetRuntime(ctx), &gl_obj_class);

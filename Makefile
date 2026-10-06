@@ -37,3 +37,13 @@ test: build/test_vfs build/test_menu build/test_ui
 
 clean:
 	rm -rf build
+
+# Boot the real MV engine on the PC against a fake GL: make boot-test WWW=<clean www> SECONDS=20
+WWW     ?= C:/Jeux/fh clean build/Fear & Hunger/www
+SECONDS ?= 20
+build/boot_host: tests/boot_host.c host/src/nx_common.c host/src/js_canvas.c host/src/js_canvas.h host/src/nx_common.h
+	@mkdir -p build
+	$(CC) -std=gnu11 -O1 -g -Wno-unused-function -Wno-unused-variable -I$(QJS) -Ithird_party/imgui -Ithird_party/stb tests/boot_host.c host/src/nx_common.c host/src/js_canvas.c $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa.c -D_GNU_SOURCE -lm -o $@
+boot-test: build/boot_host
+	./build/boot_host "$(WWW)" "$(CURDIR)" $(SECONDS) build/save
+.PHONY: boot-test
