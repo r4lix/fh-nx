@@ -8,7 +8,7 @@ Scripts: `spike/load_mv.js`, `spike/pixi_bench.js`, `spike/parse_db.js`
 
 ## Verdict
 
-Feasible. The WebGL side is the easy part. The risks are memory for the game database, one
+Feasible. The WebGL side is the easy part. The risks are boot time for the game database, one
 plugin that rasterises a full-screen canvas every frame, and the Canvas 2D / Web Audio /
 XHR / Image surface that the shim has to supply natively.
 
@@ -35,7 +35,7 @@ All 4 MB of JS (PIXI, rpg_*, 48 enabled plugins) evaluates in **144 ms** and lea
 `Archeia_Steamworks` (needs greenworks: stub it). `eval(String(parameters))` in one plugin
 and `require(...)` calls need `eval`/CommonJS shims but nothing exotic.
 
-## 3. The game database is the memory problem
+## 3. The game database: big, but a boot-time cost more than a memory problem
 
 | Data | Text | QuickJS heap |
 |---|---|---|
@@ -44,13 +44,14 @@ and `require(...)` calls need `eval`/CommonJS shims but nothing exotic.
 | of which `CommonEvents.json` | 5.6 MB | most of the rest |
 | Each map | about 2 MB | **about 9.5 MB** |
 
-Parse time for the database is 0.58 s on x86, probably several seconds on the Switch.
-Loading it all at boot, as MV does, is too much for comfort inside a homebrew's memory
-budget. Mitigations, cheapest first:
-1. Load `Troops.json` lazily (one troop on demand). It is only read by id.
-2. Pre-process the data in the build tool: drop default-valued fields, intern repeated
-   event-command objects.
-3. Do the same for `CommonEvents`.
+The Switch Lite has 4 GB, and an installed (NSP) or title-takeover app gets most of the
+~3.2 GB application pool, so 126 MB fits easily. Only applet-mode hbmenu launches have a
+heap of a few hundred MB, where this plus the image cache could matter. Target the NSP.
+
+The real cost is time: the database parses in 0.58 s on x86, probably several seconds on
+the Switch, and a bigger heap lengthens GC pauses. Cheap wins if boot feels slow:
+load `Troops.json` lazily (it is only read by id), or pre-process the data in the build
+tool to drop default-valued fields.
 
 ## 4. Canvas 2D: needed natively, with one hot spot
 
@@ -85,4 +86,4 @@ Measure before optimising.
 1. Native host skeleton: QuickJS, a GLES2 context, `gl` bindings, minimal `document`/`window`.
 2. `Bitmap`'s canvas-2D context, `Image`, XHR, fonts: enough to reach `Scene_Boot`.
 3. Boot to the title screen and into the first map, headless first (fake GL, as in the spike).
-4. Lazy Troops, then the Terrax mask on the GPU, then audio.
+4. The Terrax mask on the GPU, then audio; lazy Troops only if boot time needs it.
