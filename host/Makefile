@@ -6,7 +6,7 @@ PORTLIBS  := $(DEVKITPRO)/portlibs/switch
 CC        := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-gcc
 CXX       := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-g++
 ARCH      := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
-CFLAGS    := -O2 -g $(ARCH) -D__SWITCH__ -I$(DEVKITPRO)/libnx/include -I$(PORTLIBS)/include -I$(QJS) -D_GNU_SOURCE -Wall -Wno-unused-parameter
+CFLAGS    := -O2 -g $(ARCH) -D__SWITCH__ -I$(DEVKITPRO)/libnx/include -I$(PORTLIBS)/include -I$(QJS) -I../third_party/imgui -D_GNU_SOURCE -Wall -Wno-unused-parameter -Wno-unused-function
 LDFLAGS   := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -L$(DEVKITPRO)/libnx/lib -L$(PORTLIBS)/lib
 QSRC      := $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa.c
 SRC       := src/main.c src/js_gl.c
@@ -23,11 +23,11 @@ build/quickjs.o: $(QSRC)
 	$(CC) $(CFLAGS) -w -c $(QJS)/libregexp.c -o build/libregexp.o
 	$(CC) $(CFLAGS) -w -c $(QJS)/libunicode.c -o build/libunicode.o
 	$(CC) $(CFLAGS) -w -c $(QJS)/dtoa.c -o build/dtoa.o
-build/%.o: src/%.c src/js_gl.h src/gl_consts.inc
+build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/gl_consts.inc
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 # linked with g++: Mesa's EGL is C++
-build/fh-nx.elf: build/main.o build/js_gl.o build/quickjs.o build/fh-nx.nacp
-	$(CXX) build/main.o build/js_gl.o build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
+build/fh-nx.elf: build/main.o build/js_gl.o build/js_canvas.o build/quickjs.o build/fh-nx.nacp
+	$(CXX) build/main.o build/js_gl.o build/js_canvas.o build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
 clean:
 	rm -rf build

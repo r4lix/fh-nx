@@ -20,7 +20,16 @@ build/test_ui: $(CORE) $(MENU) $(UI) $(IMGUI) tests/test_ui.cpp $(HDRS)
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) -Ithird_party/imgui $(CORE) $(MENU) $(UI) $(IMGUI) tests/test_ui.cpp -o $@
 
-.PHONY: test clean
+# Canvas 2D host tests: QuickJS (QJS=/path/to/quickjs-ng) + the native rasteriser, no GPU.
+QJS  ?= /tmp/qjs
+FONT ?= $(CURDIR)/tests/fonts/test.ttf
+build/canvas_host: tests/canvas_host.c host/src/js_canvas.c host/src/js_canvas.h
+	@mkdir -p build
+	$(CC) -std=gnu11 -O1 -g -Wno-unused-function -Wno-unused-variable -I$(QJS) -Ithird_party/imgui tests/canvas_host.c host/src/js_canvas.c $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa.c -D_GNU_SOURCE -lm -o $@
+canvas-test: build/canvas_host
+	./build/canvas_host tests/canvas_test.js "$(FONT)" build
+
+.PHONY: test clean canvas-test
 test: build/test_vfs build/test_menu build/test_ui
 	./build/test_vfs
 	./build/test_menu

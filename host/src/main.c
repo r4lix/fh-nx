@@ -11,6 +11,7 @@
 #include <GLES2/gl2.h>
 #include <switch.h>
 
+#include "js_canvas.h"
 #include "js_gl.h"
 #include "quickjs.h"
 
@@ -182,6 +183,7 @@ static void worker(void *arg) {
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, WIDTH));
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, HEIGHT));
     JS_SetPropertyStr(ctx, nx, "gl", js_gl_create(ctx, WIDTH, HEIGHT));
+    js_canvas_init(ctx, nx);
     JS_SetPropertyStr(ctx, g, "__nx", nx);
 
     int ok = run_file(ctx, BASE "/js/env.js") && run_file(ctx, BASE "/js/demo.js");

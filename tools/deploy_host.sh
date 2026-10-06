@@ -12,6 +12,7 @@ SWTOOLS=${SWTOOLS:-/c/Users/Admin/Documents/sh2-nx/port-sh2-nx/tools}
 
 for f in env.js demo.js; do curl -s --ftp-create-dirs -T "$ROOT/host/js/$f" "$B/js/$f"; done
 for f in pixi.js pixi-tilemap.js pixi-picture.js; do curl -s --ftp-create-dirs -T "$WWW/js/libs/$f" "$B/www/js/libs/$f"; done
+for f in gamefont.css Eczar-Regular.ttf mplus-1m-regular.ttf; do curl -s --ftp-create-dirs -T "$WWW/fonts/$f" "$B/www/fonts/$f"; done
 curl -s -T "$ROOT/host/build/fh-nx.nro" "$B/fh-nx.nro"
 curl -s -Q "DELE /switch/fh-nx/log.txt" "ftp://$IP:5002/" >/dev/null 2>&1 || true
 
