@@ -70,6 +70,7 @@
   //    references that switch/variable. Self switches keep the unchanged-value guard. The dependency sets are
   //    built per map from $dataMap and rebuilt on Game_Map.setup.
   g.__stateVer = 1; g.__actVer = 1;
+  g.__watch = [new Map(), new Map()];       // [switches, variables]: id -> Set of cached idle interpreters reading it
   {
     const GM = g.Game_Map.prototype, setup = GM.setup;
     GM.setup = function () { this.__deps = null; g.__stateVer++; g.__actVer++; return setup.apply(this, arguments); };
@@ -104,6 +105,7 @@
           const now = kind === "va" ? this._data[id] : !!this._data[id];
           if (now === this.__before) return;                                       // same value: nothing to re-evaluate
           g.__stateVer++;                                                          // idle-parallel cache key (see 7)
+          if (kind) { const w = g.__watch[kind === "va" ? 1 : 0].get(id); if (w) for (const it of w) it.__dirty = true; }   // cached idle runs reading it
           if (g.__curIt) g.__curIt.__wl.push(this, id, this.__before);             // a tracked run really changed state
           if (kind && g.$gameMap) { const d = deps(); if (d.ok && !d[kind][id]) return; }   // nobody on this map reads it
         }
@@ -117,7 +119,8 @@
   {
     const GM = g.Game_Map.prototype, any = GM.isAnyEventStarting, update = GM.update;
     GM.isAnyEventStarting = function () { return this.__starting !== undefined ? this.__starting : (this.__starting = any.apply(this, arguments)); };
-    GM.update = function () { this.__starting = undefined; return update.apply(this, arguments); };
+    g.__upd = 0;
+    GM.update = function () { this.__starting = undefined; g.__upd++; return update.apply(this, arguments); };
     const GE = g.Game_Event.prototype, start = GE.start, clear = GE.clearStartingFlag;
     GE.start = function () { const r = start.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
     GE.clearStartingFlag = function () { const r = clear.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
@@ -316,7 +319,7 @@
     const tracked = (it, list, setupFn) => {
       if (!it.isRunning()) {
         if (!list) return setupFn();                                  // nothing to run: stock behaviour
-        if (it.__idleList === list && it.__idleAct === g.__actVer && nx.now() - it.__idleF < 1000 && same(it.__idleRec)) return;
+        if (it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) return;
         g.__rec = it.__r0 = [];
         g.__curIt = it;
         setupFn();
@@ -326,7 +329,12 @@
       g.__rec = null; g.__curIt = null;
       if (it.__l0 && !it.isRunning()) {
         if (it.__pure && g.__actVer === it.__a0 && (it.__wl.length === 0 || (!it.__waited && netNoop(it.__wl)))) {
-          it.__idleList = it.__l0; it.__idleAct = it.__a0; it.__idleF = nx.now(); it.__idleRec = it.__r0;
+          it.__idleList = it.__l0; it.__idleAct = it.__a0; it.__idleU = g.__upd; it.__idleRec = it.__r0;
+          // when every read is a plain switch/variable, value changes mark it dirty (no re-reading each update)
+          const r = it.__r0; let ev = true;
+          for (let i = 0; i < r.length; i += 3) if (r[i] > 1) { ev = false; break; }
+          it.__ev = ev; it.__dirty = false;
+          if (ev) for (let i = 0; i < r.length; i += 3) { const m = g.__watch[r[i]]; let st = m.get(r[i + 1]); if (!st) m.set(r[i + 1], st = new Set()); st.add(it); }
         } else it.__idleList = null;
         it.__l0 = null;
       }
