@@ -151,9 +151,10 @@
   //     counter at 0) changes nothing in Game_CharacterBase.update except _stopCount. 156 events per update
   //     made that ~8 interpreted calls each; the exact same state change is now one comparison chain.
   {
-    const CB = g.Game_CharacterBase.prototype, update = CB.update;
+    const CB = g.Game_CharacterBase.prototype, update = CB.update, baseStop = CB.updateStop, baseStopping = CB.isStopping;
     CB.update = function () {
-      if (this._realX === this._x && this._realY === this._y && this._jumpCount <= 0 && !this._stepAnime &&
+      // only for characters that keep the base updateStop/isStopping (events, followers, the player override them)
+      if (this.updateStop === baseStop && this.isStopping === baseStopping && this._realX === this._x && this._realY === this._y && this._jumpCount <= 0 && !this._stepAnime &&
           this._animationCount === 0 && this._pattern === this._originalPattern) {
         this._stopCount++;
         return;
@@ -364,6 +365,29 @@
     }
   }
 
+  // 9. A resting event (not moving/jumping/animating, no self movement, not locked, no auto trigger, not chasing,
+  //    fleeing or alerted) does in Game_Event.update only: _stopCount++, the alert lock countdown, and its parallel
+  //    interpreter. Everything else in the chain (updateStop, updateSelfMovement and Yanfly's chase hooks,
+  //    updateAnimation, checkEventTriggerAuto, updateAlert, updateReturnPhase) is a no-op for such an event.
+  //    About 160 of the ~260 event updates per frame on a big map. Only installed over the stock + Yanfly chain.
+  {
+    const GE = g.Game_Event.prototype, update = GE.update, src = String(update);
+    if (src.indexOf("updateAlert") >= 0 && src.indexOf("updateReturnPhase") >= 0 && src.length < 300) {
+      GE.update = function () {
+        if (this._realX === this._x && this._realY === this._y && this._jumpCount <= 0 && !this._stepAnime &&
+            this._animationCount === 0 && this._pattern === this._originalPattern && !this._moveRouteForcing &&
+            this._moveType === 0 && this._trigger !== 3 && !this._locked && !this._chasePlayer && !this._fleePlayer &&
+            !(this._chaseRange > 0) && !(this._fleeRange > 0) && !this._returnPhase && !this._alertPlayer) {
+          this._stopCount++;
+          if (!this._erased) this._alertLock--;
+          this.updateParallel();
+          return;
+        }
+        return update.apply(this, arguments);
+      };
+    }
+  }
+
   // 5. Catch-up cap. When a logic update costs more than 1/60 s MV runs more updates per frame to catch up
   //    (up to 15), which makes the frame even slower: a death spiral that took one map to ~1 fps. At most 2
   //    updates per frame now; a machine that cannot keep up runs the game slower instead of freezing.
@@ -405,11 +429,26 @@
         if (b && b.__scaled) { const sp = this._sprites[this._sprites.length - 1]; if (sp) sp.scale.x = sp.scale.y = b.__scaled; }
       };
       const update = proto.update;
+      // The repaint loops over all ~150 event notes twice per update (split + lowercase each) to find the few
+      // light sources. Once the plugin has seen the map (its map-change block reads every event), they run
+      // over a same-length array holding only the light events, so the other slots cost a null test.
+      const LIGHT = { light: 1, fire: 1, flashlight: 1, daynight: 1 };
+      const lit = (self, upd) => {
+        const dm = g.$dataMap;
+        if (!dm || !dm.events || self.__fm !== dm) { upd.call(self); if (dm && dm.events) self.__fm = dm; return; }
+        let le = dm.__lightEvents;
+        if (!le) {
+          le = dm.__lightEvents = new Array(dm.events.length).fill(null);
+          for (let i = 0; i < le.length; i++) { const e = dm.events[i]; if (e && LIGHT[String(e.note || "").split(" ")[0].toLowerCase()] === 1) le[i] = e; }
+        }
+        const full = dm.events; dm.events = le;
+        try { upd.call(self); } finally { dm.events = full; }
+      };
       proto.update = function () {
         const over = g.__frameMs / budget();
         const every = over > 2 ? 3 : over > 1 ? 2 : 1;
         this.__skip = ((this.__skip || 0) + 1) % every;
-        if (this.__skip === 0 || !this.__drawn) { this.__drawn = true; update.call(this); }
+        if (this.__skip === 0 || !this.__drawn) { this.__drawn = true; lit(this, update); }
       };
       nx.log("port patch: TerraxLighting load shedding installed");
     };
