@@ -144,7 +144,11 @@
         this.__cn = c._characterName; this.__ci = c._characterIndex; this.__tid = c._tileId; this.__jc = c._jumpCount; this.__sid = gm._tilesetId;
       }
       this.__off = this.x < -128 || this.x > Graphics.width + 128 || this.y < -192 || this.y > Graphics.height + 128;
+      this.renderable = !this.__off;                                   // far off screen: not drawn either
     };
+    // ... nor transformed: its world matrix is refreshed on the update that brings it back within the margin
+    const base = SC.updateTransform;
+    SC.updateTransform = function () { if (this.__off) return; return base.apply(this, arguments); };
   }
 
   // 3b. An idle character (not moving, not jumping, no step animation, resting on its original pattern, animation
