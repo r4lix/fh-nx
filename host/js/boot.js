@@ -340,6 +340,30 @@
     };
   }
 
+  // 8. Tilemap._sortChildren sorts ~150 sprites every update (~950 interpreted comparator calls) though the
+  //    order barely changes between updates. A stable insertion sort with the comparison inlined is ~n steps on
+  //    nearly sorted input and gives the identical order. Only when the comparator is the (a.z||0)/(a.y||0)/
+  //    spriteId one this game ships; anything else keeps the stock sort.
+  {
+    const TM = g.Tilemap.prototype;
+    if (String(TM._compareChildOrder).indexOf("(a.z || 0) !== (b.z || 0)") >= 0 && String(TM._sortChildren).length < 200) {
+      TM._sortChildren = function () {
+        const a = this.children;
+        for (let i = 1; i < a.length; i++) {
+          const x = a[i], xz = x.z || 0, xy = x.y || 0, xs = x.spriteId;
+          let j = i - 1;
+          for (; j >= 0; j--) {
+            const y = a[j], yz = y.z || 0;
+            if (yz < xz) break;
+            if (yz === xz) { const yy = y.y || 0; if (yy < xy || (yy === xy && !(y.spriteId > xs))) break; }
+            a[j + 1] = y;
+          }
+          a[j + 1] = x;
+        }
+      };
+    }
+  }
+
   // 5. Catch-up cap. When a logic update costs more than 1/60 s MV runs more updates per frame to catch up
   //    (up to 15), which makes the frame even slower: a death spiral that took one map to ~1 fps. At most 2
   //    updates per frame now; a machine that cannot keep up runs the game slower instead of freezing.
