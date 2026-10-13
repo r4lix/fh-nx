@@ -62,6 +62,24 @@
   // ---- Engine port patches for a bytecode interpreter (QuickJS is ~10-30x slower than the browser JIT this
   // game was built for, and one big map costs ~20 ms per logic update). Each keeps behaviour identical. ----
 
+  // 0. The port patches below keep bookkeeping on game objects (properties starting with "__": caches, interpreter
+  //    read sets, ...). JsonEx would serialise those into saves (it chokes on prototype-less objects and cycles), so
+  //    while a save is being encoded they are lifted off the objects and put back afterwards. Nothing in the game
+  //    or its plugins uses such keys.
+  {
+    const JE = g.JsonEx, src = String(JE._encode), from = "for (var key in value) {";
+    if (src.indexOf(from) >= 0) {
+      const stash = [];
+      JE.__stash = stash;
+      JE._encode = (0, eval)("(" + src.replace(from, from + " if (key.charCodeAt(0) === 95 && key.charCodeAt(1) === 95) { JsonEx.__stash.push(value, key, value[key]); delete value[key]; continue; }") + ")");
+      const stringify = JE.stringify;
+      JE.stringify = function () {
+        try { return stringify.apply(this, arguments); }
+        finally { for (let i = 0; i < stash.length; i += 3) stash[i][stash[i + 1]] = stash[i + 2]; stash.length = 0; }
+      };
+    } else nx.log("port patch: JsonEx._encode not patched (source differs)");
+  }
+
   // 1. Every switch/variable/self-switch write requests a full map refresh (every event re-evaluates its page
   //    conditions, ~2-4 ms per update on a big map), and F&H's parallel events write counters every frame. An
   //    event page only depends on: two switches, one variable threshold, a self switch, an item and an actor
@@ -317,14 +335,15 @@
       return true;
     };
     const tracked = (it, list, setupFn) => {
-      if (!it.isRunning()) {
+      if (!it._list) {
         if (!list) return setupFn();                                  // nothing to run: stock behaviour
-        if (it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) return;
+        if (it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) { if (g.__pdbg) g.__pdbg.skip++; return; }
+        if (g.__pdbg) { g.__pdbg.fresh++; if (it.__idleList === list) g.__pdbg[it.__ev ? "freshDirty" : "freshSame"]++; }
         g.__rec = it.__r0 = [];
         g.__curIt = it;
         setupFn();
         it.__pure = true; it.__wl = []; it.__waited = false; it.__a0 = g.__actVer; it.__l0 = list; it.__root = null;
-      } else if (it.__pure) { g.__rec = it.__r0; g.__curIt = it; }
+      } else { if (g.__pdbg) g.__pdbg.cont++; if (it.__pure) { g.__rec = it.__r0; g.__curIt = it; } }
       it.update();
       g.__rec = null; g.__curIt = null;
       if (it.__l0 && !it.isRunning()) {
@@ -335,7 +354,7 @@
           for (let i = 0; i < r.length; i += 3) if (r[i] > 1) { ev = false; break; }
           it.__ev = ev; it.__dirty = false;
           if (ev) for (let i = 0; i < r.length; i += 3) { const m = g.__watch[r[i]]; let st = m.get(r[i + 1]); if (!st) m.set(r[i + 1], st = new Set()); st.add(it); }
-        } else it.__idleList = null;
+        } else { it.__idleList = null; if (g.__pdbg) { const k = it.__pure ? (it.__waited ? "endPureWaitWrite" : "endPureWrite") : "endImpure"; g.__pdbg[k] = (g.__pdbg[k] || 0) + 1; } }
         it.__l0 = null;
       }
     };
@@ -343,13 +362,17 @@
     if (String(upd).length < 300) GE.updateParallel = function () {
       const it = this._interpreter;
       if (!it) return;
-      tracked(it, this.list(), () => it.setup(this.list(), this._eventId));
+      const list = this.list();
+      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) return;
+      tracked(it, list, () => it.setup(list, this._eventId));
     };
     const GC = g.Game_CommonEvent.prototype, cupd = GC.update;
     if (String(cupd).length < 300) GC.update = function () {
       const it = this._interpreter;
       if (!it) return;
-      tracked(it, this.list(), () => it.setup(this.list()));
+      const list = this.list();
+      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) return;
+      tracked(it, list, () => it.setup(list));
     };
   }
 
@@ -385,6 +408,7 @@
   {
     const GE = g.Game_Event.prototype, update = GE.update, src = String(update);
     if (src.indexOf("updateAlert") >= 0 && src.indexOf("updateReturnPhase") >= 0 && src.length < 300) {
+      GE.__restFast = true;
       GE.update = function () {
         if (this._realX === this._x && this._realY === this._y && this._jumpCount <= 0 && !this._stepAnime &&
             this._animationCount === 0 && this._pattern === this._originalPattern && !this._moveRouteForcing &&
@@ -398,6 +422,34 @@
         return update.apply(this, arguments);
       };
     }
+  }
+
+  // 10. Game_Map.events() builds a filtered copy of ~400 slots on every call (about 15 calls per update), and
+  //     updateEvents goes through forEach + Game_Event.update for every event. The list is cached per map
+  //     (the _events array is only ever built by setupEvents), and resting events (see 9) are handled inline.
+  {
+    const GM = g.Game_Map.prototype, events = GM.events, ue = GM.updateEvents, GE = g.Game_Event.prototype;
+    if (String(events).length < 200) GM.events = function () {
+      const ev = this._events;
+      if (this.__evSrc !== ev || this.__evLen !== ev.length) { this.__evSrc = ev; this.__evLen = ev.length; this.__evArr = events.apply(this, arguments); }
+      return this.__evArr;
+    };
+    if (GE.__restFast && String(ue).indexOf("forEach") >= 0 && String(ue).length < 250) GM.updateEvents = function () {
+      const evs = this.events();
+      for (let i = 0; i < evs.length; i++) {
+        const e = evs[i];
+        if (e._realX === e._x && e._realY === e._y && e._jumpCount <= 0 && !e._stepAnime &&
+            e._animationCount === 0 && e._pattern === e._originalPattern && !e._moveRouteForcing &&
+            e._moveType === 0 && e._trigger !== 3 && !e._locked && !e._chasePlayer && !e._fleePlayer &&
+            !(e._chaseRange > 0) && !(e._fleeRange > 0) && !e._returnPhase && !e._alertPlayer) {
+          e._stopCount++;
+          if (!e._erased) e._alertLock--;
+          if (e._interpreter) e.updateParallel();
+        } else e.update();
+      }
+      const ce = this._commonEvents;
+      for (let i = 0; i < ce.length; i++) ce[i].update();
+    };
   }
 
   // 5. Catch-up cap. When a logic update costs more than 1/60 s MV runs more updates per frame to catch up
