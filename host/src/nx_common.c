@@ -188,6 +188,87 @@ static JSValue nx_load_script(JSContext *ctx, JSValueConst self, int argc, JSVal
     return JS_TRUE;
 }
 
+/* ---- lazily parsed JSON arrays ------------------------------------------------------------------
+ * A big top-level JSON array (Troops.json: 12.5 MB, 221 elements) is kept as raw bytes outside the JS heap with
+ * an index of where each element starts and ends; an element is parsed only when asked for. */
+typedef struct { char *buf; size_t len; size_t *off; int n; } LazyJson;
+#define MAX_LAZY 8
+static LazyJson g_lazy[MAX_LAZY];
+
+static int is_ws(char c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t'; }
+
+static const char *skip_string(const char *p, const char *end) {   /* p at the opening quote */
+    for (p++; p < end && *p != '"'; p++) if (*p == '\\') p++;
+    return p < end ? p + 1 : end;
+}
+
+static const char *skip_value(const char *p, const char *end) {
+    if (p >= end) return p;
+    if (*p == '"') return skip_string(p, end);
+    if (*p == '{' || *p == '[') {
+        int depth = 0;
+        while (p < end) {
+            char c = *p;
+            if (c == '"') { p = skip_string(p, end); continue; }
+            if (c == '{' || c == '[') depth++;
+            else if (c == '}' || c == ']') { if (--depth == 0) return p + 1; }
+            p++;
+        }
+        return end;
+    }
+    while (p < end && *p != ',' && *p != ']' && !is_ws(*p)) p++;
+    return p;
+}
+
+/* nx.jsonLazyOpen(path) -> handle (>= 0) or -1 when the file is missing / not an array */
+static JSValue nx_json_lazy_open(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    const char *path = JS_ToCString(ctx, argv[0]);
+    if (!path) return JS_EXCEPTION;
+    size_t len;
+    char *buf = read_all(path, &len);
+    JS_FreeCString(ctx, path);
+    if (!buf) return JS_NewInt32(ctx, -1);
+    const char *p = buf, *end = buf + len;
+    if (len >= 3 && !memcmp(p, "\xEF\xBB\xBF", 3)) p += 3;
+    while (p < end && is_ws(*p)) p++;
+    int h = -1;
+    for (int i = 0; i < MAX_LAZY; i++) if (!g_lazy[i].buf) { h = i; break; }
+    if (h < 0 || p >= end || *p != '[') { free(buf); return JS_NewInt32(ctx, -1); }
+    size_t cap = 256, n = 0, *off = malloc(cap * 2 * sizeof(size_t));
+    p++;
+    for (;;) {
+        while (p < end && (is_ws(*p) || *p == ',')) p++;
+        if (p >= end || *p == ']') break;
+        const char *s0 = p, *e0 = skip_value(p, end);
+        if (n == cap) { cap *= 2; off = realloc(off, cap * 2 * sizeof(size_t)); }
+        off[2 * n] = (size_t)(s0 - buf);
+        off[2 * n + 1] = (size_t)(e0 - buf);
+        n++;
+        if (e0 <= p) break;
+        p = e0;
+    }
+    g_lazy[h].buf = buf; g_lazy[h].len = len; g_lazy[h].off = off; g_lazy[h].n = (int)n;
+    return JS_NewInt32(ctx, h);
+}
+static JSValue nx_json_lazy_count(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    int h = 0;
+    JS_ToInt32(ctx, &h, argv[0]);
+    return JS_NewInt32(ctx, (h >= 0 && h < MAX_LAZY && g_lazy[h].buf) ? g_lazy[h].n : 0);
+}
+static JSValue nx_json_lazy_get(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    int h = 0, i = 0;
+    JS_ToInt32(ctx, &h, argv[0]);
+    JS_ToInt32(ctx, &i, argv[1]);
+    if (h < 0 || h >= MAX_LAZY || !g_lazy[h].buf || i < 0 || i >= g_lazy[h].n) return JS_UNDEFINED;
+    LazyJson *l = &g_lazy[h];
+    size_t b = l->off[2 * i], e = l->off[2 * i + 1];
+    char saved = l->buf[e];                       /* JS_ParseJSON wants a NUL-terminated buffer */
+    l->buf[e] = 0;
+    JSValue v = JS_ParseJSON(ctx, l->buf + b, e - b, "<lazy>");
+    l->buf[e] = saved;
+    return v;
+}
+
 void nx_common_init(JSContext *ctx, JSValueConst nx, const char *root, NxLogFn log) {
     g_log = log;
     JS_SetPropertyStr(ctx, nx, "log", JS_NewCFunction(ctx, nx_log, "log", 1));
@@ -199,5 +280,8 @@ void nx_common_init(JSContext *ctx, JSValueConst nx, const char *root, NxLogFn l
     JS_SetPropertyStr(ctx, nx, "removeFile", JS_NewCFunction(ctx, nx_remove_file, "removeFile", 1));
     JS_SetPropertyStr(ctx, nx, "mkdir", JS_NewCFunction(ctx, nx_mkdir, "mkdir", 1));
     JS_SetPropertyStr(ctx, nx, "loadScript", JS_NewCFunction(ctx, nx_load_script, "loadScript", 1));
+    JS_SetPropertyStr(ctx, nx, "jsonLazyOpen", JS_NewCFunction(ctx, nx_json_lazy_open, "jsonLazyOpen", 1));
+    JS_SetPropertyStr(ctx, nx, "jsonLazyCount", JS_NewCFunction(ctx, nx_json_lazy_count, "jsonLazyCount", 1));
+    JS_SetPropertyStr(ctx, nx, "jsonLazyGet", JS_NewCFunction(ctx, nx_json_lazy_get, "jsonLazyGet", 2));
     JS_SetPropertyStr(ctx, nx, "root", JS_NewString(ctx, root));
 }

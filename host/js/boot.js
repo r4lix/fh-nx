@@ -591,6 +591,26 @@
     } else nx.log("port patch: map scene reuse not installed (source differs)");
   }
 
+  // 13. Troops.json is 12.5 MB (221 troops of battle-event commands) and was JSON.parse'd at boot: ~0.6 s on a PC,
+  //     ~3 s on the Switch, plus ~60 MB of live objects. $dataTroops is only read by troop id when a battle starts,
+  //     so it is now an array-shaped proxy over the raw file: an element is parsed the first time it is read.
+  if (nx.jsonLazyOpen) {
+    const DM = g.DataManager, load = DM.loadDataFile;
+    if (String(load).indexOf("XMLHttpRequest") >= 0) DM.loadDataFile = function (name, src) {
+      if (name !== "$dataTroops") return load.apply(this, arguments);
+      const h = nx.jsonLazyOpen(nx.root + "/data/" + src);
+      if (h < 0) return load.apply(this, arguments);                       // missing/odd file: the normal path reports it
+      const n = nx.jsonLazyCount(h), cache = new Array(n);
+      const idx = (k) => { if (typeof k !== "string") return -1; const c = k.charCodeAt(0); if (c < 48 || c > 57) return -1; const i = +k; return i >= 0 && i < n && String(i) === k ? i : -1; };
+      g[name] = new Proxy(new Array(n), {
+        get(t, k, r) { const i = idx(k); if (i < 0) return Reflect.get(t, k, r); let v = cache[i]; if (v === undefined) v = cache[i] = nx.jsonLazyGet(h, i); return v; },
+        has(t, k) { const i = idx(k); return i >= 0 ? true : Reflect.has(t, k); },
+        getOwnPropertyDescriptor(t, k) { const i = idx(k); if (i >= 0) return { value: this.get(t, k), writable: true, enumerable: true, configurable: true }; return Reflect.getOwnPropertyDescriptor(t, k); },
+        set(t, k, v, r) { const i = idx(k); if (i >= 0) { cache[i] = v; return true; } return Reflect.set(t, k, v, r); },
+      });
+    };
+  }
+
   // 5. Catch-up cap. When a logic update costs more than 1/60 s MV runs more updates per frame to catch up
   //    (up to 15), which makes the frame even slower: a death spiral that took one map to ~1 fps. At most 2
   //    updates per frame now; a machine that cannot keep up runs the game slower instead of freezing.
