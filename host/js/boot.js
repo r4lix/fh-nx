@@ -87,7 +87,7 @@
   //    So a refresh is requested only when the value really changed AND some page on this map (or common event)
   //    references that switch/variable. Self switches keep the unchanged-value guard. The dependency sets are
   //    built per map from $dataMap and rebuilt on Game_Map.setup.
-  g.__stateVer = 1; g.__actVer = 1;
+  g.__stateVer = 1; g.__actVer = 1; g.__imgVer = 1;
   g.__watch = [new Map(), new Map()];       // [switches, variables]: id -> Set of cached idle interpreters reading it
   {
     const GM = g.Game_Map.prototype, setup = GM.setup;
@@ -97,20 +97,55 @@
       if (gm.__deps) return gm.__deps;
       const d = { sw: Object.create(null), va: Object.create(null), ok: false };
       if (g.$dataMap && g.$dataMap.events) {
+        const add = (m, id, evId) => { const a = m[id] || (m[id] = []); if (a[a.length - 1] !== evId) a.push(evId); };
         for (const ev of g.$dataMap.events) {
           if (!ev) continue;
           for (const pg of ev.pages) {
             const c = pg.conditions;
-            if (c.switch1Valid) d.sw[c.switch1Id] = true;
-            if (c.switch2Valid) d.sw[c.switch2Id] = true;
-            if (c.variableValid) d.va[c.variableId] = true;
+            if (c.switch1Valid) add(d.sw, c.switch1Id, ev.id);
+            if (c.switch2Valid) add(d.sw, c.switch2Id, ev.id);
+            if (c.variableValid) add(d.va, c.variableId, ev.id);
           }
         }
-        for (const ce of g.$dataCommonEvents) if (ce) d.sw[ce.switchId] = true;       // trigger switch (cheap superset)
+        for (const ce of g.$dataCommonEvents) if (ce && !d.sw[ce.switchId]) d.sw[ce.switchId] = [];   // trigger switch: common events only
         d.ok = true;
       }
       return (gm.__deps = d);
     };
+    // Partial refresh: stock Game_Map.refresh re-evaluates the pages of every event (~400 on a big map, ~4 ms on a PC,
+    // and F&H's proximity switches toggle several times a second). When the only reason for the refresh is a
+    // switch/variable/self-switch change, just the events reading it are refreshed. Any other request (items,
+    // party, direct refresh() calls) still does the full pass.
+    const refreshSrc = String(GM.refresh), requestSrc = String(GM.requestRefresh);
+    g.__partialOK = refreshSrc.indexOf("refreshTileEvents") >= 0 && refreshSrc.length < 330 && requestSrc.length < 90;
+    const markPartial = (gm, list) => {
+      const dirty = gm.__dirtyEv || (gm.__dirtyEv = []);
+      for (let i = 0; i < list.length; i++) dirty.push(list[i]);
+      gm.__partial = true;
+      gm._needsRefresh = true;
+    };
+    if (g.__partialOK) {
+      const refresh = GM.refresh, request = GM.requestRefresh;
+      GM.requestRefresh = function () { this.__full = true; return request.apply(this, arguments); };
+      GM.refresh = function () {
+        const dirty = this.__dirtyEv;
+        if (this.__partial && !this.__full && dirty) {
+          let tiles = false;
+          for (let i = 0; i < dirty.length; i++) {
+            const e = this._events[dirty[i]];
+            if (!e) continue;
+            const was = e._tileId > 0;
+            e.refresh();
+            if ((e._tileId > 0) !== was) tiles = true;
+          }
+          const ce = this._commonEvents;
+          for (let i = 0; i < ce.length; i++) ce[i].refresh();
+          if (tiles) this.refreshTileEvents();
+          this._needsRefresh = false;
+        } else refresh.apply(this, arguments);
+        this.__partial = false; this.__full = false; if (dirty) dirty.length = 0;
+      };
+    }
     for (const [cls, kind] of [[g.Game_Variables, "va"], [g.Game_Switches, "sw"], [g.Game_SelfSwitches, null]]) {
       const proto = cls.prototype, setValue = proto.setValue, onChange = proto.onChange;
       proto.setValue = function (id) {
@@ -123,9 +158,16 @@
           const now = kind === "va" ? this._data[id] : !!this._data[id];
           if (now === this.__before) return;                                       // same value: nothing to re-evaluate
           g.__stateVer++;                                                          // idle-parallel cache key (see 7)
-          if (kind) { const w = g.__watch[kind === "va" ? 1 : 0].get(id); if (w) for (const it of w) it.__dirty = true; }   // cached idle runs reading it
+          if (kind) { const w = g.__watch[kind === "va" ? 1 : 0].get(id); if (w) for (const it of w) { it.__dirty = true; if (it.__owner) it.__owner.__sleep = false; } }   // cached idle runs reading it
           if (g.__curIt) g.__curIt.__wl.push(this, id, this.__before);             // a tracked run really changed state
-          if (kind && g.$gameMap) { const d = deps(); if (d.ok && !d[kind][id]) return; }   // nobody on this map reads it
+          const gm = g.$gameMap;
+          if (gm && g.__partialOK) {
+            // only the events whose pages read this value (and the common events) need re-evaluating
+            if (kind) {
+              const d = deps();
+              if (d.ok) { const list = d[kind][id]; if (!list) return; markPartial(gm, list); return; }
+            } else if (id[0] === gm._mapId) { markPartial(gm, [id[1]]); return; }
+          } else if (kind && gm) { const d = deps(); if (d.ok && !d[kind][id]) return; }   // nobody on this map reads it
         }
         return onChange.apply(this, arguments);
       };
@@ -295,7 +337,15 @@
   {
     const bump = (proto, names) => { for (const n of names) { const f = proto[n]; if (typeof f === "function") proto[n] = function () { g.__actVer++; return f.apply(this, arguments); }; } };
     bump(g.Game_BattlerBase.prototype, ["refresh", "clearStates", "addNewState", "eraseState"]);
+    for (const n of ["setCharacterImage", "setFaceImage", "setBattlerImage"]) {          // image reads (spec kinds 355/322/900) are versioned separately
+      const f = g.Game_Actor.prototype[n];
+      if (typeof f === "function") g.Game_Actor.prototype[n] = function () { g.__imgVer++; return f.apply(this, arguments); };
+    }
     bump(g.Game_Actor.prototype, ["setName", "changeClass", "learnSkill", "forgetSkill", "changeEquip", "forceChangeEquip", "discardEquip", "initEquips", "clearEquipments", "optimizeEquipments", "setup", "releaseUnequippableItems"]);
+    for (const C of [g.Game_Player, g.Game_Follower]) {          // the player's/followers' own sprite images (read by $gamePlayer.refresh checks)
+      const si = C.prototype.setImage;
+      C.prototype.setImage = function (n, i) { if (this._characterName !== n || this._characterIndex !== i) g.__imgVer++; return si.apply(this, arguments); };
+    }
     bump(g.Game_Party.prototype, ["gainItem", "gainGold", "loseGold", "addActor", "removeActor", "setupStartingMembers", "initialize"]);
   }
   {
@@ -337,7 +387,7 @@
     const tracked = (it, list, setupFn) => {
       if (!it._list) {
         if (!list) return setupFn();                                  // nothing to run: stock behaviour
-        if (it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) { if (g.__pdbg) g.__pdbg.skip++; return; }
+        if (it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? (!it.__dirty && (!it.__img5 || it.__img5 === g.__imgVer)) : same(it.__idleRec))) { if (g.__pdbg) g.__pdbg.skip++; return; }
         if (g.__pdbg) { g.__pdbg.fresh++; if (it.__idleList === list) g.__pdbg[it.__ev ? "freshDirty" : "freshSame"]++; }
         g.__rec = it.__r0 = [];
         g.__curIt = it;
@@ -351,9 +401,12 @@
           it.__idleList = it.__l0; it.__idleAct = it.__a0; it.__idleU = g.__upd; it.__idleRec = it.__r0;
           // when every read is a plain switch/variable, value changes mark it dirty (no re-reading each update)
           const r = it.__r0; let ev = true;
-          for (let i = 0; i < r.length; i += 3) if (r[i] > 1) { ev = false; break; }
-          it.__ev = ev; it.__dirty = false;
-          if (ev) for (let i = 0; i < r.length; i += 3) { const m = g.__watch[r[i]]; let st = m.get(r[i + 1]); if (!st) m.set(r[i + 1], st = new Set()); st.add(it); }
+          for (let i = 0; i < r.length; i += 3) if (r[i] > 1 && r[i] !== 5) { ev = false; break; }   // image reads are covered by __actVer (setImage hooks)
+          let h5 = false; for (let i = 0; i < r.length; i += 3) if (r[i] === 5) { h5 = true; break; }
+          it.__ev = ev; it.__dirty = false; it.__img5 = h5 ? g.__imgVer : 0;
+          const ow = it.__owner;
+          if (ow) { ow.__sleep = ev; ow.__sleepUntil = g.__upd + 60; ow.__sleepAct = g.__actVer; ow.__sleepImg = it.__img5; }   // owner is skipped outright until woken
+          if (ev) for (let i = 0; i < r.length; i += 3) { if (r[i] === 5) continue; const m = g.__watch[r[i]]; let st = m.get(r[i + 1]); if (!st) m.set(r[i + 1], st = new Set()); st.add(it); }
         } else { it.__idleList = null; if (g.__pdbg) { const k = it.__pure ? (it.__waited ? "endPureWaitWrite" : "endPureWrite") : "endImpure"; g.__pdbg[k] = (g.__pdbg[k] || 0) + 1; } }
         it.__l0 = null;
       }
@@ -363,7 +416,8 @@
       const it = this._interpreter;
       if (!it) return;
       const list = this.list();
-      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) return;
+      it.__owner = this;
+      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? (!it.__dirty && (!it.__img5 || it.__img5 === g.__imgVer)) : same(it.__idleRec))) return;
       tracked(it, list, () => it.setup(list, this._eventId));
     };
     const GC = g.Game_CommonEvent.prototype, cupd = GC.update;
@@ -371,7 +425,8 @@
       const it = this._interpreter;
       if (!it) return;
       const list = this.list();
-      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? !it.__dirty : same(it.__idleRec))) return;
+      it.__owner = this;
+      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? (!it.__dirty && (!it.__img5 || it.__img5 === g.__imgVer)) : same(it.__idleRec))) return;
       tracked(it, list, () => it.setup(list));
     };
   }
@@ -434,6 +489,10 @@
       if (this.__evSrc !== ev || this.__evLen !== ev.length) { this.__evSrc = ev; this.__evLen = ev.length; this.__evArr = events.apply(this, arguments); }
       return this.__evArr;
     };
+    // a page change or common-event refresh replaces the interpreter/list: wake the owner
+    { const sp = GE.setupPage, cr = g.Game_CommonEvent.prototype.refresh;
+      GE.setupPage = function () { this.__sleep = false; return sp.apply(this, arguments); };
+      g.Game_CommonEvent.prototype.refresh = function () { const before = this._interpreter; const r = cr.apply(this, arguments); if (this._interpreter !== before) this.__sleep = false; return r; }; }
     if (GE.__restFast && String(ue).indexOf("forEach") >= 0 && String(ue).length < 250) GM.updateEvents = function () {
       const evs = this.events();
       for (let i = 0; i < evs.length; i++) {
@@ -444,11 +503,12 @@
             !(e._chaseRange > 0) && !(e._fleeRange > 0) && !e._returnPhase && !e._alertPlayer) {
           e._stopCount++;
           if (!e._erased) e._alertLock--;
-          if (e._interpreter) e.updateParallel();
+          if (e._interpreter && !(e.__sleep && e.__sleepUntil > g.__upd && e.__sleepAct === g.__actVer && (!e.__sleepImg || e.__sleepImg === g.__imgVer))) e.updateParallel();
         } else e.update();
       }
       const ce = this._commonEvents;
-      for (let i = 0; i < ce.length; i++) ce[i].update();
+      const up = g.__upd, av = g.__actVer;
+      for (let i = 0; i < ce.length; i++) { const c = ce[i]; if (!(c.__sleep && c.__sleepUntil > up && c.__sleepAct === av && (!c.__sleepImg || c.__sleepImg === g.__imgVer))) c.update(); }
     };
   }
 
@@ -520,6 +580,7 @@
   step("plugins loaded");
   g.window.onload();                                  // SceneManager.run(Scene_Boot)
   step("SceneManager.run");
+  try { __loadScript("js/dev_extra.js"); nx.log("dev_extra.js loaded"); } catch (e) { /* optional device-side probe script */ }
 
   // scene graph dump for debugging what is on screen (depth-limited)
   g.__dump = function (node, depth, indent) {

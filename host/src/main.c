@@ -91,6 +91,26 @@ static JSValue nx_pad(JSContext *ctx, JSValueConst self, int argc, JSValueConst 
     return a;
 }
 
+static JSRuntime *s_rt;
+
+/* nx.gc(): run one full collection and return its duration in ms (device-side probe). */
+static JSValue nx_gc(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    u64 t0 = armGetSystemTick();
+    JS_RunGC(s_rt);
+    u64 t1 = armGetSystemTick();
+    return JS_NewFloat64(ctx, (double)(t1 - t0) * 1000.0 / (double)armGetSystemTickFreq());
+}
+
+/* nx.mem(): [malloc_size bytes, object count] */
+static JSValue nx_mem(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    JSMemoryUsage u;
+    JS_ComputeMemoryUsage(s_rt, &u);
+    JSValue a = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)u.malloc_size));
+    JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, (double)u.obj_count));
+    return a;
+}
+
 static int run_file(JSContext *ctx, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) { say("missing %s\n", path); return 0; }
@@ -116,6 +136,7 @@ static void worker(void *arg) {
 
     JSRuntime *rt = JS_NewRuntime2(js_fast_malloc_functions(), NULL);       /* pool allocator: see js_alloc.h */
     JS_SetMaxStackSize(rt, 8u << 20);
+    s_rt = rt;
     JSContext *ctx = JS_NewContext(rt);
 
     JSValue g = JS_GetGlobalObject(ctx);
@@ -123,6 +144,8 @@ static void worker(void *arg) {
     nx_common_init(ctx, nx, BASE "/www", log_line);
     JS_SetPropertyStr(ctx, nx, "saveDir", JS_NewString(ctx, BASE "/save"));
     JS_SetPropertyStr(ctx, nx, "pad", JS_NewCFunction(ctx, nx_pad, "pad", 0));
+    JS_SetPropertyStr(ctx, nx, "gc", JS_NewCFunction(ctx, nx_gc, "gc", 0));
+    JS_SetPropertyStr(ctx, nx, "mem", JS_NewCFunction(ctx, nx_mem, "mem", 0));
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, WIDTH));
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, HEIGHT));
     JS_SetPropertyStr(ctx, nx, "gl", js_gl_create(ctx, WIDTH, HEIGHT));
