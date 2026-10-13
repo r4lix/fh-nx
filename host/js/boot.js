@@ -31,6 +31,22 @@
     }
   };
 
+  // Port patch: Bitmap.blur (the blurred menu/battle backdrop taken by SceneManager.snapForBackground) is 18
+  // full-screen additive draws; the native context does the same two 3x3 box passes directly. And a map->map
+  // transfer takes the snapshot for a background nobody will show: skipped.
+  {
+    const blur = g.Bitmap.prototype.blur;
+    g.Bitmap.prototype.blur = function () {
+      if (this.width > 0 && this.height > 0 && this._context && this._context.__blur) { this._context.__blur(2); this._setDirty(); }
+      else blur.apply(this, arguments);
+    };
+    const snap = g.SceneManager.snapForBackground;
+    g.SceneManager.snapForBackground = function () {
+      if (this.isNextScene(g.Scene_Map)) return;
+      return snap.apply(this, arguments);
+    };
+  }
+
   // Port patch: MV keeps 100 Sprite_Picture objects alive and runs update + updateBitmap + a Game_Screen lookup
   // on each of them every frame, even with no picture shown: ~170 interpreted calls per frame doing nothing.
   // A hidden sprite whose own picture slot is empty is skipped. The picture array and the in-battle offset

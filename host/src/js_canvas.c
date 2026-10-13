@@ -1426,6 +1426,37 @@ static JSValue c2d_adjustTone(JSContext *ctx, JSValueConst self, int argc, JSVal
     return JS_UNDEFINED;
 }
 
+/* Bitmap.blur, natively: MV runs two passes of a 3x3 box blur as 18 full-screen additive draws (~100 ms on a PC,
+ * about 0.5 s on the Switch, paid on every menu open and map transfer through snapForBackground). This does the
+ * same two passes (edge pixels clamped, as MV's padded copy does) as separable 3-tap sums. */
+static JSValue c2d_blur(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    Ctx *c = get_ctx(ctx, self);
+    if (!c) return JS_EXCEPTION;
+    int passes = argc > 0 ? (int)argd(ctx, argv, 0) : 2;
+    int w = c->s->w, h = c->s->h;
+    if (w < 1 || h < 1) return JS_UNDEFINED;
+    uint8_t *px = c->s->b->px;
+    uint8_t *tmp = malloc((size_t)w * h * 4);
+    if (!tmp) return JS_ThrowOutOfMemory(ctx);
+    for (int pass = 0; pass < passes; pass++) {
+        for (int y = 0; y < h; y++) {                       /* horizontal: px -> tmp */
+            const uint8_t *r = px + (size_t)y * w * 4;
+            uint8_t *o = tmp + (size_t)y * w * 4;
+            for (int x = 0; x < w; x++) {
+                const uint8_t *a = r + (x > 0 ? x - 1 : 0) * 4, *b = r + x * 4, *d = r + (x < w - 1 ? x + 1 : x) * 4;
+                for (int k = 0; k < 4; k++) o[x * 4 + k] = (uint8_t)((a[k] + b[k] + d[k] + 1) / 3);
+            }
+        }
+        for (int y = 0; y < h; y++) {                       /* vertical: tmp -> px */
+            const uint8_t *r0 = tmp + (size_t)(y > 0 ? y - 1 : 0) * w * 4, *r1 = tmp + (size_t)y * w * 4, *r2 = tmp + (size_t)(y < h - 1 ? y + 1 : y) * w * 4;
+            uint8_t *o = px + (size_t)y * w * 4;
+            for (int i = 0; i < w * 4; i++) o[i] = (uint8_t)((r0[i] + r1[i] + r2[i] + 1) / 3);
+        }
+    }
+    free(tmp);
+    return JS_UNDEFINED;
+}
+
 static JSValue c2d_createImageData(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     int w = (int)argd(ctx, argv, 0), h = (int)argd(ctx, argv, 1);
     if (w <= 0 || h <= 0) return JS_ThrowRangeError(ctx, "createImageData: empty size");
@@ -1791,7 +1822,7 @@ static const JSCFunctionListEntry k_ctx_funcs[] = {
     JS_CFUNC_DEF("fillRect", 4, c2d_fillRect), JS_CFUNC_DEF("strokeRect", 4, c2d_strokeRect),
     JS_CFUNC_DEF("clearRect", 4, c2d_clearRect), JS_CFUNC_DEF("drawImage", 9, c2d_drawImage),
     JS_CFUNC_DEF("getImageData", 4, c2d_getImageData), JS_CFUNC_DEF("putImageData", 3, c2d_putImageData),
-    JS_CFUNC_DEF("createImageData", 2, c2d_createImageData), JS_CFUNC_DEF("__adjustTone", 3, c2d_adjustTone),
+    JS_CFUNC_DEF("createImageData", 2, c2d_createImageData), JS_CFUNC_DEF("__adjustTone", 3, c2d_adjustTone), JS_CFUNC_DEF("__blur", 1, c2d_blur),
     JS_CFUNC_DEF("createLinearGradient", 4, c2d_createLinearGradient),
     JS_CFUNC_DEF("createRadialGradient", 6, c2d_createRadialGradient),
     JS_CFUNC_DEF("measureText", 1, c2d_measureText), JS_CFUNC_DEF("fillText", 4, c2d_fillText),
