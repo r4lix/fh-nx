@@ -512,6 +512,34 @@
     };
   }
 
+  // 11. Window._refreshBack / _refreshFrame redraw a window's background and border from the windowskin with
+  //     dozens of blits (and a tone adjust), several times per window, for ~10 windows each time Scene_Map is
+  //     built (about 60 of ~300 ms PC per map transfer). The result only depends on the skin, the window size and
+  //     the tone, and nothing draws on those bitmaps afterwards, so identical ones are shared. Capped per skin
+  //     (animated windows resize through many sizes).
+  {
+    const W = g.Window.prototype, back = W._refreshBack, frame = W._refreshFrame;
+    if (String(back).indexOf("adjustTone") >= 0 && String(frame).indexOf("new Bitmap") >= 0) {
+      const cacheFor = (skin, kind) => { const k = "__" + kind; let c = skin[k]; if (!c) c = skin[k] = new Map(); if (c.size > 48) c.clear(); return c; };
+      W._refreshBack = function () {
+        const skin = this._windowskin, m = this._margin, w = this._width - m * 2, h = this._height - m * 2;
+        if (!skin || !skin.isReady || !skin.isReady() || !(w > 0 && h > 0)) return back.apply(this, arguments);
+        const t = this._colorTone, key = w + "x" + h + "|" + t[0] + "," + t[1] + "," + t[2], c = cacheFor(skin, "backs"), hit = c.get(key);
+        if (!hit) { back.apply(this, arguments); c.set(key, this._windowBackSprite.bitmap); return; }
+        const sp = this._windowBackSprite;
+        sp.bitmap = hit; sp.setFrame(0, 0, w, h); sp.move(m, m);
+      };
+      W._refreshFrame = function () {
+        const skin = this._windowskin, w = this._width, h = this._height;
+        if (!skin || !skin.isReady || !skin.isReady()) return frame.apply(this, arguments);
+        const key = w + "x" + h, c = cacheFor(skin, "frames"), hit = c.get(key);
+        if (!hit) { frame.apply(this, arguments); c.set(key, this._windowFrameSprite.bitmap); return; }
+        const sp = this._windowFrameSprite;
+        sp.bitmap = hit; sp.setFrame(0, 0, w, h);
+      };
+    } else nx.log("port patch: window background cache not installed (source differs)");
+  }
+
   // 5. Catch-up cap. When a logic update costs more than 1/60 s MV runs more updates per frame to catch up
   //    (up to 15), which makes the frame even slower: a death spiral that took one map to ~1 fps. At most 2
   //    updates per frame now; a machine that cannot keep up runs the game slower instead of freezing.
