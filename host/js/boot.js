@@ -556,6 +556,41 @@
     } else nx.log("port patch: window background cache not installed (source differs)");
   }
 
+  // 12. Closing a menu rebuilds the whole map scene: the map JSON is parsed again (~25 ms on a PC) and a new
+  //     Spriteset_Map creates ~420 character sprites, tilemap, lightmask and pictures (~45 ms), ~0.5 s on the
+  //     Switch. When the map scene went to a menu scene (not a battle, not a transfer) and the same map comes back
+  //     with the same event list, the parsed map data and the spriteset are kept and put back. The sprites follow
+  //     their characters every frame anyway, so the result matches a rebuilt one.
+  {
+    const SMp = g.Scene_Map.prototype, DM = g.DataManager, term = SMp.terminate, create = SMp.createSpriteset, load = DM.loadMapData;
+    if (String(create).indexOf("new Spriteset_Map") >= 0 && String(load).indexOf("loadDataFile") >= 0) {
+      let kept = null;
+      SMp.terminate = function () {
+        const r = term.apply(this, arguments);
+        const next = g.SceneManager._nextScene;
+        kept = null;
+        if (next && next instanceof g.Scene_MenuBase && this._spriteset && g.$gameMap && g.$dataMap && !g.$gamePlayer.isTransferring()) {
+          kept = { sp: this._spriteset, id: g.$gameMap.mapId(), dm: g.$dataMap, ev: g.$gameMap._events, n: g.$gameMap._events.length, tile: g.$gameMap._tilesetId };
+        }
+        return r;
+      };
+      DM.loadMapData = function (mapId) {
+        if (kept && kept.id === mapId && mapId > 0 && !g.$gamePlayer.isTransferring()) { g.$dataMap = kept.dm; return; }
+        return load.apply(this, arguments);
+      };
+      SMp.createSpriteset = function () {
+        const k = kept; kept = null;
+        const gm = g.$gameMap;
+        if (k && !this._transfer && gm && k.id === gm.mapId() && k.dm === g.$dataMap && k.ev === gm._events && k.n === gm._events.length && k.tile === gm._tilesetId) {
+          this._spriteset = k.sp;
+          this.addChild(this._spriteset);
+          return;
+        }
+        return create.apply(this, arguments);
+      };
+    } else nx.log("port patch: map scene reuse not installed (source differs)");
+  }
+
   // 5. Catch-up cap. When a logic update costs more than 1/60 s MV runs more updates per frame to catch up
   //    (up to 15), which makes the frame even slower: a death spiral that took one map to ~1 fps. At most 2
   //    updates per frame now; a machine that cannot keep up runs the game slower instead of freezing.
