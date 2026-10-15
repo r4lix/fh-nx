@@ -92,6 +92,27 @@ static JSValue nx_read_file(JSContext *ctx, JSValueConst self, int argc, JSValue
     return v;
 }
 
+/* nx.readRange(path, offset, length) -> ArrayBuffer of that slice of a file (null when it cannot be read): lets a long
+ * movie stay on the SD card and be read a frame at a time. */
+static JSValue nx_read_range(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    const char *path = JS_ToCString(ctx, argv[0]);
+    if (!path) return JS_EXCEPTION;
+    double off = 0, len = 0;
+    JS_ToFloat64(ctx, &off, argv[1]);
+    JS_ToFloat64(ctx, &len, argv[2]);
+    FILE *f = fopen(path, "rb");
+    JS_FreeCString(ctx, path);
+    if (!f || len < 0 || len > 256.0 * 1048576.0) { if (f) fclose(f); return JS_NULL; }
+    uint8_t *buf = malloc(len > 0 ? (size_t)len : 1);
+    if (!buf) { fclose(f); return JS_NULL; }
+    size_t got = 0;
+    if (fseek(f, (long)off, SEEK_SET) == 0) got = fread(buf, 1, (size_t)len, f);
+    fclose(f);
+    JSValue v = JS_NewArrayBufferCopy(ctx, buf, got);
+    free(buf);
+    return v;
+}
+
 static JSValue nx_read_binary(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     const char *path = JS_ToCString(ctx, argv[0]);
     if (!path) return JS_EXCEPTION;
@@ -276,6 +297,7 @@ void nx_common_init(JSContext *ctx, JSValueConst nx, const char *root, NxLogFn l
     JS_SetPropertyStr(ctx, nx, "sleep", JS_NewCFunction(ctx, nx_sleep, "sleep", 1));
     JS_SetPropertyStr(ctx, nx, "readFile", JS_NewCFunction(ctx, nx_read_file, "readFile", 1));
     JS_SetPropertyStr(ctx, nx, "readBinary", JS_NewCFunction(ctx, nx_read_binary, "readBinary", 1));
+    JS_SetPropertyStr(ctx, nx, "readRange", JS_NewCFunction(ctx, nx_read_range, "readRange", 3));
     JS_SetPropertyStr(ctx, nx, "writeFile", JS_NewCFunction(ctx, nx_write_file, "writeFile", 2));
     JS_SetPropertyStr(ctx, nx, "removeFile", JS_NewCFunction(ctx, nx_remove_file, "removeFile", 1));
     JS_SetPropertyStr(ctx, nx, "mkdir", JS_NewCFunction(ctx, nx_mkdir, "mkdir", 1));

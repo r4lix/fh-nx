@@ -220,15 +220,79 @@
     };
     return el;
   };
-  // <video>: no decoder yet, so a movie "plays" instantly: it loads, plays and ends on the next tick. MV's
-  // interpreter waits on the ended event ("Play Movie" parks the event until it fires), so without this
-  // the game's intro movie would hang the opening forever on a black screen.
+  // <video>. The host has no video decoder, so a movie is shipped as <name>.fhv beside <name>.webm (tools/transcode_video.py:
+  // JPEG frames + an Ogg Vorbis track in one file). The player draws the frames into a Bitmap on top of the stage and plays
+  // the sound through the Web Audio shim. A movie without an .fhv "plays" instantly (it loads, plays and ends on the next
+  // tick): MV's "Play Movie" parks the interpreter on the ended event, so skipping it would hang the game on black.
+  function openFhv(src) {
+    const rel = String(src || "").split("?")[0].replace(/\.[^./]+$/, ".fhv");
+    const path = resolvePath(rel);
+    const head = nx.readRange(path, 0, 4);
+    if (!head || head.byteLength < 4) return null;
+    const hl = new DataView(head).getUint32(0, true), raw = nx.readRange(path, 4, hl);
+    if (!raw) return null;
+    let hdr;
+    try { hdr = JSON.parse(String.fromCharCode.apply(null, new Uint8Array(raw))); } catch (e) { return null; }
+    return { path, hdr };
+  }
+  function playFhv(m, done) {
+    const { path, hdr } = m, W = g.Graphics.width, H = g.Graphics.height;
+    const stage = g.SceneManager._scene;
+    if (!stage) { done(); return; }
+    const black = new g.Sprite(new g.Bitmap(W, H)); black.bitmap.fillRect(0, 0, W, H, "#000000");
+    const bmp = new g.Bitmap(hdr.w, hdr.h), spr = new g.Sprite(bmp);
+    const k = Math.min(W / hdr.w, H / hdr.h);
+    spr.scale.x = spr.scale.y = k; spr.x = Math.round((W - hdr.w * k) / 2); spr.y = Math.round((H - hdr.h * k) / 2);
+    stage.addChild(black); stage.addChild(spr);
+    const im = new g.Image(); im.complete = true;
+    const st = { t0: 0, last: -1, alive: true, src: null, ctx: null };
+    const finish = () => {
+      if (!st.alive) return;
+      st.alive = false;
+      try { if (st.src) st.src.stop(); } catch (e) {}
+      stage.removeChild(spr); stage.removeChild(black);
+      done();
+    };
+    const step = () => {
+      if (!st.alive) return;
+      if (st.t0) {
+        const idx = Math.floor((nx.now() - st.t0) / 1000 * hdr.fps);
+        if (idx >= hdr.frames.length) { finish(); return; }
+        if (idx !== st.last) {                                   // behind schedule: only the frame that is due is decoded
+          st.last = idx;
+          const [o, l] = hdr.frames[idx], buf = nx.readRange(path, o, l), r = buf && nx.decodeImage(buf);
+          if (r) { im._s = r.surface; im.width = im.naturalWidth = r.width; im.height = im.naturalHeight = r.height; bmp._context.drawImage(im, 0, 0); bmp._setDirty(); bmp.checkDirty(); }
+        }
+      }
+      g.requestAnimationFrame(step);
+    };
+    const start = () => { st.t0 = nx.now(); };
+    const aud = hdr.audio && hdr.audio[1] > 0 ? nx.readRange(path, hdr.audio[0], hdr.audio[1]) : null;
+    if (aud) {
+      try {
+        const ctx = st.ctx = new g.AudioContext();
+        ctx.decodeAudioData(aud, (buf) => {
+          if (!st.alive) return;
+          const src = st.src = ctx.createBufferSource(), gain = ctx.createGain();
+          gain.gain.value = g.AudioManager ? Math.max(0, Math.min(1, g.AudioManager.bgmVolume / 100)) : 0.9;
+          src.buffer = buf; src.connect(gain); gain.connect(ctx.destination); src.start(0);
+          start();
+        }, () => start());
+      } catch (e) { start(); }
+    } else start();
+    g.requestAnimationFrame(step);
+  }
   function videoElement() {
     const v = element("video");
-    v.volume = 1; v.muted = false; v.videoWidth = 0; v.videoHeight = 0; v.currentTime = 0; v.duration = 0; v.paused = true;
+    v.volume = 1; v.muted = false; v.videoWidth = 0; v.videoHeight = 0; v.currentTime = 0; v.duration = 0; v.paused = true; v.src = "";
     v.onloadeddata = v.onended = v.onerror = null;
-    v.load = () => { g.setTimeout(() => { if (typeof v.onloadeddata === "function") v.onloadeddata({ target: v }); }, 0); };
-    v.play = () => { v.paused = false; g.setTimeout(() => { v.paused = true; if (typeof v.onended === "function") v.onended({ target: v }); }, 0); return Promise.resolve(); };
+    v.load = () => { v._m = openFhv(v.src); g.setTimeout(() => { if (typeof v.onloadeddata === "function") v.onloadeddata({ target: v }); }, 0); };
+    v.play = () => {
+      v.paused = false;
+      const end = () => { v.paused = true; if (typeof v.onended === "function") v.onended({ target: v }); };
+      if (v._m) playFhv(v._m, end); else g.setTimeout(end, 0);
+      return Promise.resolve();
+    };
     v.pause = () => { v.paused = true; };
     return v;
   }
