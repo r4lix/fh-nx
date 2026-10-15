@@ -34,9 +34,20 @@ HOST_DEPS := $(HOST_C) host/src/js_canvas.h host/src/audio_mix.h host/src/nx_com
 build/canvas_host: tests/canvas_host.c $(HOST_DEPS)
 	@mkdir -p build
 	$(CC) $(HOST_CF) tests/canvas_host.c $(HOST_C) $(QJS_C) -lm -lpthread -o $@
-build/boot_host: tests/boot_host.c $(HOST_DEPS)
+# the mods subsystem is C++: compile it to objects and link the whole host with g++
+MODS_CPP := host/src/mods.cpp src/vfs/Vfs.cpp src/vfs/ModManager.cpp src/core/Json.cpp src/menu/ModMenuModel.cpp
+MODS_OBJ := $(patsubst %.cpp,build/mods_obj/%.o,$(MODS_CPP))
+build/mods_obj/%.o: %.cpp host/src/mods.h host/src/mods_state.hpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -O2 -g -w -I$(QJS) -Ithird_party/imgui -c $< -o $@
+BOOT_C := tests/boot_host.c $(HOST_C) $(QJS_C)
+BOOT_OBJ := $(patsubst %.c,build/boot_obj/%.o,$(subst :,_,$(BOOT_C)))
+build/boot_obj/%.o: %.c $(HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(HOST_CF) -c $< -o $@
+build/boot_host: $(BOOT_OBJ) $(MODS_OBJ)
 	@mkdir -p build
-	$(CC) $(HOST_CF) tests/boot_host.c $(HOST_C) $(QJS_C) -lm -lpthread -o $@
+	$(CXX) $(BOOT_OBJ) $(MODS_OBJ) -lm -lpthread -o $@
 
 # canvas 2D rasteriser checks (90) and the audio mixer checks (needs build/test_*.ogg, made by decrypt_one.py)
 canvas-test: build/canvas_host

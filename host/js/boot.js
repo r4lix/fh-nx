@@ -18,6 +18,21 @@
     "js/rpg_windows.js", "js/plugins.js"]) __loadScript(f);
   step("engine loaded");
 
+  // Mods: plugins that enabled mods add to the game, and parameter overrides of existing ones (host/src/mods.cpp).
+  if (nx.modPlugins) {
+    const m = JSON.parse(nx.modPlugins());
+    for (const o of m.overrides) {
+      const p = g.$plugins.find((x) => x.name === o.plugin);
+      if (p) Object.assign(p.parameters, o.parameters); else nx.log("mod: parameter override for unknown plugin " + o.plugin);
+    }
+    for (const e of m.plugins) {
+      const ex = g.$plugins.find((x) => x.name === e.name);
+      if (ex) { ex.status = true; Object.assign(ex.parameters, e.parameters); }
+      else g.$plugins.push({ name: e.name, status: true, description: e.description || "", parameters: e.parameters });
+    }
+    if (m.plugins.length || m.overrides.length) nx.log("mods: " + m.plugins.length + " plugin(s) added, " + m.overrides.length + " parameter override(s)");
+  }
+
   // MV's error printer builds DOM; send it to the log instead
   g.Graphics.printError = (name, message) => nx.log("MV ERROR: " + name + ": " + message);
   g.Graphics.printLoadingError = (url) => nx.log("MV LOADING ERROR: " + url);

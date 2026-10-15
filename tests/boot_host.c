@@ -11,6 +11,7 @@
 #include "../host/src/nx_common.h"
 #include "../host/src/audio_mix.h"
 #include "../host/src/js_alloc.h"
+#include "../host/src/mods.h"
 
 static void log_line(const char *s) { printf("%s\n", s); fflush(stdout); }
 
@@ -47,6 +48,11 @@ int main(int argc, char **argv) {
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, 720));
     js_canvas_init(ctx, nx);
     js_audio_init(ctx, nx);
+    if (getenv("FH_MODS")) {                         /* FH_MODS=<mods dir> [FH_MODS_INI=<ini>]: boot with the mods subsystem */
+        const char *ini = getenv("FH_MODS_INI");
+        printf("mods found: %d\n", mods_init(www, getenv("FH_MODS"), ini ? ini : "build/mods.ini"));
+        mods_js_init(ctx, nx);
+    }
     JS_SetPropertyStr(ctx, g, "__nx", nx);
 
     char path[1024];

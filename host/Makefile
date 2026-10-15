@@ -36,8 +36,13 @@ build/js_canvas.o: CFLAGS += -O3 -ffast-math
 build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/audio_mix.h src/audio_out.h src/js_alloc.h src/gl_consts.inc
 	@mkdir -p build
 	$(CC) $(CFLAGS) $(AUDIO_INC) -c $< -o $@
+# the mods subsystem (layered file view, mod manager, menu model) is C++
+CXXFLAGS_HOST := -std=gnu++17 -O2 -g $(ARCH) -D__SWITCH__ -I$(DEVKITPRO)/libnx/include -I$(PORTLIBS)/include -I$(QJS) -I../third_party/imgui -w
+MODS_SRC := src/mods.cpp ../src/vfs/Vfs.cpp ../src/vfs/ModManager.cpp ../src/core/Json.cpp ../src/menu/ModMenuModel.cpp
+MODS_OBJ := $(addprefix build/mods_,$(addsuffix .o,$(notdir $(basename $(MODS_SRC)))))
+$(foreach f,$(MODS_SRC),$(eval build/mods_$(notdir $(basename $(f))).o: $(f) src/mods.h src/mods_state.hpp ; @mkdir -p build ; $(CXX) $(CXXFLAGS_HOST) -c $$< -o $$@))
 # linked with g++: Mesa's EGL is C++
-build/fh-nx.elf: build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o build/js_alloc.o $(THIRD_OBJ) build/quickjs.o build/fh-nx.nacp
-	$(CXX) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o build/js_alloc.o $(THIRD_OBJ) build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
+build/fh-nx.elf: $(MODS_OBJ) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o build/js_alloc.o $(THIRD_OBJ) build/quickjs.o build/fh-nx.nacp
+	$(CXX) build/main.o build/nx_common.o build/js_gl.o build/js_canvas.o build/audio_mix.o build/audio_out.o build/js_alloc.o $(THIRD_OBJ) $(MODS_OBJ) build/quickjs.o build/libregexp.o build/libunicode.o build/dtoa.o $(LDFLAGS) 	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
 clean:
 	rm -rf build

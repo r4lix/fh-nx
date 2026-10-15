@@ -133,7 +133,7 @@
         const b = blobs.get(url);
         if (b) bytes = b.parts[0];
       } else {
-        bytes = nx.readBinary(nx.root + "/" + decodeURIComponent(url.split("?")[0]));
+        bytes = readBinaryRel(decodeURIComponent(url.split("?")[0]));
       }
       const r = bytes ? nx.decodeImage(bytes) : null;
       if (!r) { this._fire("error"); return; }
@@ -149,14 +149,41 @@
   g.WebGLRenderingContext = function () {};
   g.ImageData = function () {};
 
+  // ---- file resolution: enabled mods override files of the base game (see host/src/mods.cpp) ----------------
+  function resolvePath(rel) {
+    if (nx.modResolve) { const r = nx.modResolve(rel); if (r) return r[0]; }
+    return nx.root + "/" + rel;
+  }
+  g.__resolvePath = resolvePath;
+  // MV's Decrypter wants .rpgmvp/.rpgmvo/.rpgmvm: a mod may ship the plain file instead, so wrap it the way MV's own
+  // tool does (16-byte header, first 16 bytes XORed with the System.json key).
+  const ENC_EXT = { ".rpgmvp": 1, ".rpgmvo": 1, ".rpgmvm": 1 };
+  function encryptPlain(buf) {
+    g.Decrypter.readEncryptionkey();
+    const key = g.Decrypter._encryptionKey, src = new Uint8Array(buf), out = new Uint8Array(16 + src.length);
+    const head = [0x52, 0x50, 0x47, 0x4d, 0x56, 0, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0];
+    out.set(head, 0); out.set(src, 16);
+    for (let i = 0; i < 16 && i < src.length; i++) out[16 + i] ^= parseInt(key[i], 16);
+    return out.buffer;
+  }
+  function readBinaryRel(rel) {
+    const dot = rel.lastIndexOf("."), ext = dot >= 0 ? rel.slice(dot).toLowerCase() : "";
+    if (nx.modResolve) {
+      const r = nx.modResolve(rel);
+      if (r) { const b = nx.readBinary(r[0]); return b && ENC_EXT[ext] && !r[1] ? encryptPlain(b) : b; }
+    }
+    return nx.readBinary(nx.root + "/" + rel);
+  }
+  g.__readBinaryRel = readBinaryRel;
+
   // ---- fonts: @font-face from stylesheets (gamefont.css) and Graphics.loadFont's insertRule ------
   const fontFamilies = new Set();
   function parseFontFace(rule, baseDir) {
     const fam = /font-family:\s*["']?([^;"']+?)["']?\s*;/.exec(rule), url = /url\(\s*["']?([^)"']+?)["']?\s*\)/.exec(rule);
-    if (fam && url && nx.registerFont(fam[1].trim(), nx.root + "/" + baseDir + url[1])) fontFamilies.add(fam[1].trim().toLowerCase());
+    if (fam && url && nx.registerFont(fam[1].trim(), resolvePath(baseDir + url[1]))) fontFamilies.add(fam[1].trim().toLowerCase());
   }
   g.__registerCss = function (rel) {
-    const css = nx.readFile(nx.root + "/" + rel);
+    const css = nx.readFile(resolvePath(rel));
     if (!css) return;
     const dir = rel.replace(/[^/]*$/, "");
     for (const m of css.matchAll(/@font-face\s*\{([^}]*)\}/g)) parseFontFace(m[1], dir);
@@ -273,9 +300,9 @@
     setRequestHeader() {}
     send() {
       g.setTimeout(() => {
-        const path = nx.root + "/" + decodeURIComponent(this._url.split("?")[0].replace(/^\.?\//, ""));
+        const rel = decodeURIComponent(this._url.split("?")[0].replace(/^\.?\//, ""));
         const bin = this.responseType === "arraybuffer";
-        const body = bin ? nx.readBinary(path) : nx.readFile(path);
+        const body = bin ? readBinaryRel(rel) : nx.readFile(resolvePath(rel));
         this.readyState = 4;
         if (body === null) { this.status = 404; if (this.onerror) this.onerror({}); return; }
         this.status = 200;
@@ -392,6 +419,6 @@
   // ---- script loading ----------------------------------------------------------------------------
   g.__loadScript = function (rel) {
     g.document.currentScript = { src: rel };
-    if (nx.loadScript(nx.root + "/" + rel) === null) throw new Error("cannot load " + rel);
+    if (nx.loadScript(resolvePath(rel)) === null) throw new Error("cannot load " + rel);
   };
 })(globalThis);

@@ -16,6 +16,7 @@
 #include "js_alloc.h"
 #include "js_canvas.h"
 #include "js_gl.h"
+#include "mods.h"
 #include "nx_common.h"
 #include "quickjs.h"
 
@@ -151,6 +152,8 @@ static void worker(void *arg) {
     JS_SetPropertyStr(ctx, nx, "gl", js_gl_create(ctx, WIDTH, HEIGHT));
     js_canvas_init(ctx, nx);
     js_audio_init(ctx, nx);
+    say("mods: %d found\n", mods_init(BASE "/www", BASE "/mods", BASE "/mods.ini"));
+    mods_js_init(ctx, nx);
     {
         int arc = audio_out_start();
         say("audio out: %s (rc=0x%x)\n", arc == 0 ? "started" : "FAILED", (unsigned)arc);
