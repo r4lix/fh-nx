@@ -323,7 +323,7 @@
     let c = null;
     try { c = JSON.parse(nx.controls()); } catch (e) {}
     if (!c) return;
-    const m = { 12: "up", 13: "down", 14: "left", 15: "right" };
+    const m = { 9: "menu", 12: "up", 13: "down", 14: "left", 15: "right" };      // + also opens the game menu, as in the Nexus scheme
     for (const sym in c) { const i = STD.indexOf(BIT[c[sym]]); if (i >= 0) m[i] = sym; }
     g.Input.gamepadMapper = m;
   };

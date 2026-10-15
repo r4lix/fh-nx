@@ -17,11 +17,12 @@ import sys
 
 def find_www(root):
     """The folder inside `root` that looks like the game's www/ (has data/ or js/)."""
+    if os.path.isdir(os.path.join(root, "data")) or os.path.isdir(os.path.join(root, "js")):
+        return root
     for dp, dn, _ in os.walk(root):
         if os.path.basename(dp).lower() == "www" or ("data" in dn and "js" in dn):
-            if os.path.isdir(os.path.join(dp, "data")) or os.path.isdir(os.path.join(dp, "js")):
-                return dp
-    return root
+            return dp
+    return None
 
 
 def load_plugins(path):
@@ -41,14 +42,17 @@ def main():
     ap.add_argument("--version", default="")
     ap.add_argument("--description", default="")
     ap.add_argument("--tested", action="store_true")
+    ap.add_argument("--copy", action="append", default=[], metavar="SRC=REL", help="extra file (relative to the extracted dir) to place at REL in the mod")
+    ap.add_argument("--plugin", action="append", default=[], metavar="NAME", help="enable/add this plugin (when the mod ships no plugins.js)")
     a = ap.parse_args()
 
-    www = find_www(a.src)
+    www = find_www(a.src)                      # None for a bare plugin file: only --copy then
     out = os.path.join(a.mods, a.id)
     if os.path.exists(out):
         shutil.rmtree(out)
     changed, data_changed = [], False
-    for dp, _, fn in os.walk(www):
+    walk = os.walk(www) if www else []
+    for dp, _, fn in walk:
         for f in fn:
             full = os.path.join(dp, f)
             rel = os.path.relpath(full, www).replace("\\", "/")
@@ -64,9 +68,19 @@ def main():
             if rel.startswith("data/"):
                 data_changed = True
 
-    plugins, overrides = [], []
-    mp = os.path.join(www, "js/plugins.js")
-    if os.path.exists(mp):
+    for c in a.copy:
+        srcrel, rel = c.split("=", 1)
+        dst = os.path.join(out, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(os.path.join(a.src, srcrel), dst)
+        changed.append(rel)
+
+    plugins, overrides = [], [
+    ]
+    for n in a.plugin:
+        plugins.append({"name": n, "description": "", "parameters": {}})
+    mp = os.path.join(www or "", "js/plugins.js")
+    if www and os.path.exists(mp):
         base = {p["name"]: p for p in load_plugins(os.path.join(a.clean, "js/plugins.js"))}
         for p in load_plugins(mp):
             b = base.get(p["name"])
