@@ -202,7 +202,7 @@ extern "C" int menu_init(const char* ttfPath, const char* title) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     g.ui = std::make_unique<ModMenuUi>(*s.model);
-    g.title = title ? title : "Fear & Hunger NX";
+    g.title = title ? title : "Fear & Hunger";
     g.ready = true;
     return 1;
 }

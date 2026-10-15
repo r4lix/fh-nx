@@ -179,7 +179,7 @@ static int run_session(void) {
     int errors = 0;
     u64 frames = 0, t_js = 0, t_swap = 0;
     u64 t0 = armGetSystemTick();
-    int menu_ok = menu_init(BASE "/www/fonts/Eczar-Regular.ttf", "Fear & Hunger NX"), menu_open = 0;
+    int menu_ok = menu_init(BASE "/www/fonts/Eczar-Regular.ttf", "Fear & Hunger"), menu_open = 0;
     say("mods menu: %s\n", menu_ok ? "ready (hold - for 2 s)" : "unavailable");
 
     while (ok && !g_quit) {

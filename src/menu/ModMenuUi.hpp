@@ -9,7 +9,7 @@
 class ModMenuUi {
 public:
     struct Header {
-        std::string title;     // "Fear & Hunger NX, version 0.1.0"
+        std::string title;     // "Fear & Hunger, version 0.1.0"
         std::string status;    // right-aligned: clock / fps, may be empty
     };
 
