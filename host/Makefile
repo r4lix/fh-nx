@@ -12,7 +12,7 @@ QSRC      := $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa
 SRC       := src/main.c src/js_gl.c
 
 build/fh-nx.nro: build/fh-nx.elf build/fh-nx.nacp
-	$(DEVKITPRO)/tools/bin/elf2nro $< $@ --icon=$(DEVKITPRO)/libnx/default_icon.jpg --nacp=build/fh-nx.nacp
+	$(DEVKITPRO)/tools/bin/elf2nro $< $@ --icon=icon.jpg --nacp=build/fh-nx.nacp
 build/fh-nx.nacp:
 	@mkdir -p build
 	$(DEVKITPRO)/tools/bin/nacptool --create "Fear & Hunger NX" "r4lix" "0.0.1" $@
