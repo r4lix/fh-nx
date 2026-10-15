@@ -284,7 +284,9 @@ int main(int argc, char **argv) {
             if (!minus_since) minus_since = now;
             else if (now - minus_since > 2 * armGetSystemTickFreq()) { g_menu_req = 1; minus_since = 0; }
         } else minus_since = 0;
-        if (padGetButtonsDown(&pad) & HidNpadButton_Plus) g_quit = 1;       /* dev: + quits */
+#ifdef FH_DEV_QUIT
+        if (padGetButtonsDown(&pad) & HidNpadButton_Plus) g_quit = 1;       /* dev builds only: + quits (tools/dev_*.sh rely on it) */
+#endif
         svcSleepThread(4000000ULL);
     }
     g_quit = 1;

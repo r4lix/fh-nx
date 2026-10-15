@@ -7,6 +7,7 @@ CC        := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-gcc
 CXX       := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-g++
 ARCH      := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS    := -O2 -g $(ARCH) -D__SWITCH__ -I$(DEVKITPRO)/libnx/include -I$(PORTLIBS)/include -I$(QJS) -I../third_party/imgui -I../third_party/stb -D_GNU_SOURCE -Wall -Wno-unused-parameter -Wno-unused-function
+CFLAGS    += $(EXTRA_CFLAGS)           # EXTRA_CFLAGS=-DFH_DEV_QUIT: + quits, for the tools/dev_*.sh scripts
 LDFLAGS   := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -L$(DEVKITPRO)/libnx/lib -L$(PORTLIBS)/lib
 QSRC      := $(QJS)/quickjs.c $(QJS)/libregexp.c $(QJS)/libunicode.c $(QJS)/dtoa.c
 SRC       := src/main.c src/js_gl.c
