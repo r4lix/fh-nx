@@ -670,10 +670,10 @@
     g.Spriteset_Map.prototype.createLightmask = function () {
       create.apply(this, arguments);
       const proto = this._lightmask && Object.getPrototypeOf(this._lightmask);
-      // Half-resolution mask: lighting is soft gradients, so the mask bitmap is drawn at 1/k size (the 2D
+      // Reduced-resolution mask (1/4; 1/2 before; use powers of two - 1/3 misses the integer-edge fast paths and was 2x slower): lighting is soft gradients, so the mask bitmap is drawn at 1/k size (the 2D
       // context is scaled so the plugin's own coordinates stay valid) and its sprite is scaled back up by k.
       // Every pixel operation and the per-frame texture upload get k*k cheaper. g.__lightScale = 1 disables.
-      const k = typeof g.__lightScale === "number" ? g.__lightScale : 2, bmp = this._lightmask && this._lightmask._maskBitmap;
+      const k = typeof g.__lightScale === "number" ? g.__lightScale : 4, bmp = this._lightmask && this._lightmask._maskBitmap;
       if (k > 1 && bmp && !bmp.__scaled) {
         bmp.resize(Math.ceil(bmp.width / k), Math.ceil(bmp.height / k));
         bmp._context.scale(1 / k, 1 / k);
