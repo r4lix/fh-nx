@@ -205,8 +205,11 @@ static RGBA paint_at(const Paint *p, const double *inv, double px, double py) {
 
 typedef struct { uint8_t *m; int refs; } Mask;
 
-enum { SRC_OVER, LIGHTER, LIGHTEN, DARKEN, MULTIPLY, SCREEN, DEST_OUT, COPY };
-static const char *k_comp_names[] = {"source-over", "lighter", "lighten", "darken", "multiply", "screen", "destination-out", "copy"};
+enum { SRC_OVER, LIGHTER, LIGHTEN, DARKEN, MULTIPLY, SCREEN, DEST_OUT, COPY, SRC_ATOP, DEST_IN, SRC_IN, SRC_OUT, DEST_OVER, DEST_ATOP, XOR, DIFFERENCE };
+static const char *k_comp_names[] = {"source-over", "lighter", "lighten", "darken", "multiply", "screen", "destination-out", "copy",
+                                     "source-atop", "destination-in", "source-in", "source-out", "destination-over", "destination-atop", "xor", "difference"};
+/* modes where a source pixel of alpha 0 still changes the destination (it clears it, or is replaced by it) */
+static inline int comp_acts_on_clear(int comp) { return comp == COPY || comp == DEST_IN || comp == SRC_IN || comp == SRC_OUT || comp == DEST_ATOP || comp == XOR; }
 
 typedef struct {
     double m[6];
@@ -300,9 +303,52 @@ static inline int mul255(int a, int b) { return (a * b + 127) / 255; }
 
 /* d: destination pixel (straight RGBA), s: source colour, a: effective source alpha 0..255. */
 static void blend_px(uint8_t *d, RGBA s, int a, int comp) {
-    if (a <= 0 && comp != COPY) return;
+    if (a <= 0 && !comp_acts_on_clear(comp)) return;
     int da = d[3];
     switch (comp) {
+    case SRC_ATOP:                           /* the source only shows where there is destination; alpha is the destination's */
+        if (da == 0) return;
+        d[0] = (uint8_t)(d[0] + ((s.r - d[0]) * a + (s.r >= d[0] ? 127 : -127)) / 255);
+        d[1] = (uint8_t)(d[1] + ((s.g - d[1]) * a + (s.g >= d[1] ? 127 : -127)) / 255);
+        d[2] = (uint8_t)(d[2] + ((s.b - d[2]) * a + (s.b >= d[2] ? 127 : -127)) / 255);
+        return;
+    case DEST_IN:                            /* keep the destination only where the source is: alpha scales by the source's */
+        d[3] = (uint8_t)mul255(da, a);
+        return;
+    case SRC_IN: {                           /* the source, only where there is destination */
+        int oa = mul255(a, da);
+        d[0] = s.r; d[1] = s.g; d[2] = s.b; d[3] = (uint8_t)oa;
+        return;
+    }
+    case SRC_OUT: {                          /* the source, only where there is no destination */
+        int oa = mul255(a, 255 - da);
+        d[0] = s.r; d[1] = s.g; d[2] = s.b; d[3] = (uint8_t)oa;
+        return;
+    }
+    case DEST_ATOP:                          /* the destination, only where there is source; the source shows behind it */
+        d[0] = (uint8_t)((s.r * (255 - da) + d[0] * da) / 255);
+        d[1] = (uint8_t)((s.g * (255 - da) + d[1] * da) / 255);
+        d[2] = (uint8_t)((s.b * (255 - da) + d[2] * da) / 255);
+        d[3] = (uint8_t)a;
+        return;
+    case DEST_OVER: {                        /* the source goes behind the destination */
+        int k = mul255(a, 255 - da), oa = da + k;
+        if (oa == 0) return;
+        d[0] = (uint8_t)((d[0] * da + s.r * k) / oa);
+        d[1] = (uint8_t)((d[1] * da + s.g * k) / oa);
+        d[2] = (uint8_t)((d[2] * da + s.b * k) / oa);
+        d[3] = (uint8_t)oa;
+        return;
+    }
+    case XOR: {
+        int ka = mul255(a, 255 - da), kb = mul255(da, 255 - a), oa = ka + kb;
+        if (oa == 0) { d[0] = d[1] = d[2] = d[3] = 0; return; }
+        d[0] = (uint8_t)((s.r * ka + d[0] * kb) / oa);
+        d[1] = (uint8_t)((s.g * ka + d[1] * kb) / oa);
+        d[2] = (uint8_t)((s.b * ka + d[2] * kb) / oa);
+        d[3] = (uint8_t)oa;
+        return;
+    }
     case DEST_OUT:
         d[3] = (uint8_t)mul255(da, 255 - a);
         return;
@@ -329,7 +375,7 @@ static void blend_px(uint8_t *d, RGBA s, int a, int comp) {
         d[3] = (uint8_t)oa;
         return;
     }
-    case LIGHTEN: case DARKEN: case MULTIPLY: case SCREEN:
+    case LIGHTEN: case DARKEN: case MULTIPLY: case SCREEN: case DIFFERENCE:
         if (da != 0) {                       /* blend function B(dst, src), then source-over of B */
             int r = s.r, g = s.g, b = s.b;
             int dr = d[0], dg = d[1], db = d[2];
@@ -337,6 +383,7 @@ static void blend_px(uint8_t *d, RGBA s, int a, int comp) {
             case LIGHTEN: r = r > dr ? r : dr; g = g > dg ? g : dg; b = b > db ? b : db; break;
             case DARKEN: r = r < dr ? r : dr; g = g < dg ? g : dg; b = b < db ? b : db; break;
             case MULTIPLY: r = mul255(r, dr); g = mul255(g, dg); b = mul255(b, db); break;
+            case DIFFERENCE: r = r > dr ? r - dr : dr - r; g = g > dg ? g - dg : dg - g; b = b > db ? b - db : db - b; break;
             default: r = r + dr - mul255(r, dr); g = g + dg - mul255(g, dg); b = b + db - mul255(b, db); break;
             }
             s.r = r; s.g = g; s.b = b;
@@ -1377,7 +1424,7 @@ static JSValue c2d_drawImage(JSContext *ctx, JSValueConst self, int argc, JSValu
                 if (u < 0 || v < 0 || u >= isw || v >= ish) continue;
                 sample_bilinear(src, isx, isy, isw, ish, u, v, c->st.smooth, &s);
             }
-            if (s.a == 0 && c->st.comp != COPY) continue;
+            if (s.a == 0 && !comp_acts_on_clear(c->st.comp)) continue;
             put_px(c, x, y, s, 255);
         }
     }

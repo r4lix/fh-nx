@@ -250,12 +250,13 @@
           this.__dx === gm._displayX && this.__dy === gm._displayY && this.__rx === c._realX && this.__ry === c._realY &&
           this.__dir === c._direction && this.__pat === c._pattern && this.__op === c._opacity && this.__bt === c._blendType &&
           this.__cn === c._characterName && this.__ci === c._characterIndex && this.__tid === c._tileId &&
+          this.__tr === c._transparent && this.__bd === c._bushDepth && this.__pt === c._priorityType &&
           this.__jc === c._jumpCount && this.__sid === gm._tilesetId) return;
       update.apply(this, arguments);
       if (c) {
         this.__dx = gm._displayX; this.__dy = gm._displayY; this.__rx = c._realX; this.__ry = c._realY;
         this.__dir = c._direction; this.__pat = c._pattern; this.__op = c._opacity; this.__bt = c._blendType;
-        this.__cn = c._characterName; this.__ci = c._characterIndex; this.__tid = c._tileId; this.__jc = c._jumpCount; this.__sid = gm._tilesetId;
+        this.__cn = c._characterName; this.__ci = c._characterIndex; this.__tid = c._tileId; this.__tr = c._transparent; this.__bd = c._bushDepth; this.__pt = c._priorityType; this.__jc = c._jumpCount; this.__sid = gm._tilesetId;
       }
       this.__off = this.x < -128 || this.x > Graphics.width + 128 || this.y < -192 || this.y > Graphics.height + 128;
       this.renderable = !this.__off;                                   // far off screen: not drawn either
@@ -684,6 +685,21 @@
         getOwnPropertyDescriptor(t, k) { const i = idx(k); if (i >= 0) return { value: this.get(t, k), writable: true, enumerable: true, configurable: true }; return Reflect.getOwnPropertyDescriptor(t, k); },
         set(t, k, v, r) { const i = idx(k); if (i >= 0) { cache[i] = v; return true; } return Reflect.set(t, k, v, r); },
       });
+    };
+  }
+
+  // 14. YEP_GabWindow draws map "gab" lines at a fixed Y (560) which sits inside the message window's area, so a
+  //     dialog box and a gab cover each other. While a message is on screen the gab bar moves up above the box.
+  if (g.Window_Gab) {
+    const WG = g.Window_Gab.prototype, upd = WG.update;
+    WG.update = function () {
+      const sc = g.SceneManager._scene, mw = sc && sc._messageWindow;
+      if (mw && mw.openness > 0 && !this._battle) {
+        if (this.__baseY === undefined) this.__baseY = this.y;
+        const y = mw.y - this.height + this.standardPadding() - 4;     // the bar's content ends just above the box
+        if (this.y !== y) this.y = y;
+      } else if (this.__baseY !== undefined) { this.y = this.__baseY; this.__baseY = undefined; }
+      return upd.apply(this, arguments);
     };
   }
 

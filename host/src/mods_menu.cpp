@@ -24,6 +24,7 @@ struct Menu {
     GLint locProj = -1, locTex = -1, locPos = -1, locUv = -1, locCol = -1;
     uint64_t prev = 0;
     int prevTouch = 0;
+    bool first = false;          /* first frame after opening: buttons already held (the - that opened it) are not presses */
 };
 Menu g;
 
@@ -207,6 +208,7 @@ extern "C" int menu_init(const char* ttfPath, const char* title) {
 }
 
 extern "C" void menu_reset_focus(void) {
+    g.first = true;
     if (g.ui) g.ui->resetFocus();
 }
 
@@ -215,6 +217,7 @@ extern "C" int menu_frame(const MenuInput* in) {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kW, kH);
     io.DeltaTime = 1.f / 60.f;
+    if (g.first) { g.prev = in->buttons; g.first = false; }
     feed(*in, *g.ui);
 
     uint64_t down = in->buttons & ~g.prev;

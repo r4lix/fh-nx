@@ -419,4 +419,31 @@ function dump(name, t) { nx.writePPM(name, nx.surfaceBuffer(t.s), t.canvas.width
   dump("demo.ppm", demo);
 }
 
+
+// Porter-Duff modes MV's tint pipeline (Sprite._executeTint) needs: source-atop and destination-in
+{
+  const a = mk(20, 20);
+  a.ctx.fillStyle = "#00ff00"; a.ctx.fillRect(5, 5, 10, 10);                     // a green square on transparent
+  a.ctx.globalCompositeOperation = "source-atop"; a.ctx.fillStyle = "#ff0000"; a.ctx.fillRect(0, 0, 20, 20);
+  const inside = px(a.ctx, 10, 10), outside = px(a.ctx, 2, 2);
+  ok("source-atop paints only on existing pixels (" + inside + ")", inside[0] === 255 && inside[1] === 0 && inside[3] === 255);
+  ok("source-atop leaves transparent pixels transparent (" + outside + ")", outside[3] === 0);
+
+  const t = mk(20, 20), m = mk(20, 20);
+  t.ctx.fillStyle = "#808080"; t.ctx.fillRect(0, 0, 20, 20);                      // a fully opaque tinted rectangle
+  m.ctx.fillStyle = "#ffffff"; m.ctx.fillRect(5, 5, 10, 10);                      // the sprite's alpha: a small square
+  t.ctx.globalCompositeOperation = "destination-in"; t.ctx.drawImage(m.canvas, 0, 0);
+  ok("destination-in keeps the destination where the source is opaque", px(t.ctx, 10, 10)[3] === 255);
+  ok("destination-in clears it where the source is transparent", px(t.ctx, 2, 2)[3] === 0);
+
+  const d = mk(4, 4);
+  d.ctx.fillStyle = "#c80000"; d.ctx.fillRect(0, 0, 4, 4);
+  d.ctx.globalCompositeOperation = "difference"; d.ctx.fillStyle = "#ffffff"; d.ctx.fillRect(0, 0, 4, 4);
+  const df = px(d.ctx, 1, 1);
+  ok("difference with white inverts (" + df + ")", df[0] === 55 && df[1] === 255 && df[2] === 255);
+  const o = mk(4, 4);
+  o.ctx.globalCompositeOperation = "source-in"; o.ctx.fillStyle = "#ff0000"; o.ctx.fillRect(0, 0, 4, 4);
+  ok("source-in over nothing leaves nothing", px(o.ctx, 1, 1)[3] === 0);
+}
+
 print(globalThis.__failures ? globalThis.__failures + " FAILED of " + checks + " checks" : "all " + checks + " checks passed");
