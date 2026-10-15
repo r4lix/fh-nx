@@ -529,18 +529,43 @@
     { const sp = GE.setupPage, cr = g.Game_CommonEvent.prototype.refresh;
       GE.setupPage = function () { this.__sleep = false; return sp.apply(this, arguments); };
       g.Game_CommonEvent.prototype.refresh = function () { const before = this._interpreter; const r = cr.apply(this, arguments); if (this._interpreter !== before) this.__sleep = false; return r; }; }
+    // Amortization: an event that has been resting for SETTLED consecutive checks (and has no interpreter) is only
+    // looked at every (SKIP+1)th update. The skipped updates would only have counted _stopCount and _alertLock up
+    // and down, so those are owed (__sc/__sd) and paid at the next check, exactly. The methods that make an event
+    // stop resting wake it at once; anything else (a plugin writing a flag directly) is noticed within SKIP updates.
+    const SETTLED = 24, SKIP = 3;
+    const wake = (e) => {
+      if (e.__sd) { e._stopCount += e.__sc; if (!e._erased) e._alertLock -= e.__sd; e.__sd = e.__sc = 0; }
+      e.__skip = 0; e.__rs = 0;
+    };
+    if (!g.__noAmort) {
+      const CBp = g.Game_CharacterBase.prototype, CHp = g.Game_Character.prototype;
+      for (const [proto, names] of [[CBp, ["moveStraight", "moveDiagonally", "jump"]], [CHp, ["forceMoveRoute"]], [GE, ["setupPage", "lock", "start", "erase"]]]) {
+        for (const n of names) {
+          const f = Object.prototype.hasOwnProperty.call(proto, n) ? proto[n] : null;
+          if (typeof f === "function") proto[n] = function () { if (this.__rs || this.__skip) wake(this); return f.apply(this, arguments); };
+        }
+      }
+      const rs = CBp.resetStopCount;
+      if (typeof rs === "function") CBp.resetStopCount = function () { this.__sc = 0; return rs.apply(this, arguments); };
+    }
     if (GE.__restFast && String(ue).indexOf("forEach") >= 0 && String(ue).length < 250) GM.updateEvents = function () {
-      const evs = this.events();
+      const evs = this.events(), amort = !g.__noAmort;
       for (let i = 0; i < evs.length; i++) {
         const e = evs[i];
+        if (e.__skip > 0) { e.__skip--; e.__sd++; e.__sc++; continue; }
         if (e._realX === e._x && e._realY === e._y && e._jumpCount <= 0 && !e._stepAnime &&
             e._animationCount === 0 && e._pattern === e._originalPattern && !e._moveRouteForcing &&
             e._moveType === 0 && e._trigger !== 3 && !e._locked && !e._chasePlayer && !e._fleePlayer &&
             !(e._chaseRange > 0) && !(e._fleeRange > 0) && !e._returnPhase && !e._alertPlayer) {
-          e._stopCount++;
-          if (!e._erased) e._alertLock--;
-          if (e._interpreter && !(e.__sleep && e.__sleepUntil > g.__upd && e.__sleepAct === g.__actVer && (!e.__sleepImg || e.__sleepImg === g.__imgVer))) e.updateParallel();
-        } else e.update();
+          const sd = e.__sd | 0;
+          e._stopCount += 1 + (e.__sc | 0);
+          if (!e._erased) e._alertLock -= 1 + sd;
+          e.__sd = e.__sc = 0;
+          if (e._interpreter) {
+            if (!(e.__sleep && e.__sleepUntil > g.__upd && e.__sleepAct === g.__actVer && (!e.__sleepImg || e.__sleepImg === g.__imgVer))) e.updateParallel();
+          } else if (amort && (e.__rs = (e.__rs | 0) + 1) >= SETTLED) e.__skip = e.__rs === SETTLED ? (e._eventId & 3) : SKIP;   // first time: staggered by id so checks spread over the updates
+        } else { if (e.__rs || e.__sd) wake(e); e.update(); }
       }
       const ce = this._commonEvents;
       const up = g.__upd, av = g.__actVer;
