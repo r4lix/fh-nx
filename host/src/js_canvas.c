@@ -657,6 +657,18 @@ static void fill_rect_dev(Ctx *c, double x0, double y0, double x1, double y1, co
         for (int y = iy0; y < iy1; y++) span_solid(c, y, ix0, ix1, p->c, a, &lut);
         return;
     }
+    if (p->g && c->st.comp == LIGHTER) {
+        /* An additive gradient rectangle (TerraxLighting's lights, drawn into a scaled-down mask so their edges land
+         * between pixels) fades to nothing at its border: covering the outer pixels whole instead of antialiasing the
+         * rim changes nothing visible, and avoids the general per-pixel path, ~10x slower. */
+        int jx0 = (int)floor(x0), jy0 = (int)floor(y0), jx1 = (int)ceil(x1), jy1 = (int)ceil(y1);
+        if (jx0 < 0) jx0 = 0;
+        if (jy0 < 0) jy0 = 0;
+        if (jx1 > c->s->w) jx1 = c->s->w;
+        if (jy1 > c->s->h) jy1 = c->s->h;
+        rect_gradient(c, jx0, jy0, jx1, jy1, p);
+        return;
+    }
     Pt pts[4] = {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}};
     Sub s = {pts, 4, 4, 1};
     fill_path(c, &s, 1, p);
