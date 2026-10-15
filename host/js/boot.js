@@ -47,6 +47,26 @@
     };
   }
 
+  // Port patch: Bitmap.snap (the backdrop behind menus/battle, ~175 ms on the Switch: render the whole stage, then a
+  // synchronous glReadPixels of 816x624) renders at a fraction of the size and scales back up. The backdrop is blurred
+  // anyway. g.__snapScale = 1 restores the stock full-size snapshot.
+  {
+    const snap = g.Bitmap.snap;
+    if (String(snap).indexOf("extract.canvas") >= 0) g.Bitmap.snap = function (stage) {
+      const k = typeof g.__snapScale === "number" ? g.__snapScale : 0.5;
+      if (!stage || k >= 1 || !g.Graphics.isWebGL()) return snap.apply(this, arguments);
+      const width = g.Graphics.width, height = g.Graphics.height, bitmap = new g.Bitmap(width, height), context = bitmap._context;
+      const rt = g.PIXI.RenderTexture.create(width, height, g.PIXI.SCALE_MODES.LINEAR, k);
+      g.Graphics._renderer.render(stage, rt);
+      stage.worldTransform.identity();
+      const canvas = g.Graphics._renderer.extract.canvas(rt);
+      context.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, width, height);
+      rt.destroy({ destroyBase: true });
+      bitmap._setDirty();
+      return bitmap;
+    };
+  }
+
   // Port patch: MV keeps 100 Sprite_Picture objects alive and runs update + updateBitmap + a Game_Screen lookup
   // on each of them every frame, even with no picture shown: ~170 interpreted calls per frame doing nothing.
   // A hidden sprite whose own picture slot is empty is skipped. The picture array and the in-battle offset
@@ -556,7 +576,7 @@
     } else nx.log("port patch: window background cache not installed (source differs)");
   }
 
-  // 12. Closing a menu rebuilds the whole map scene: the map JSON is parsed again (~25 ms on a PC) and a new
+  // 12. Closing a menu or ending a battle rebuilds the whole map scene: the map JSON is parsed again (~25 ms on a PC) and a new
   //     Spriteset_Map creates ~420 character sprites, tilemap, lightmask and pictures (~45 ms), ~0.5 s on the
   //     Switch. When the map scene went to a menu scene (not a battle, not a transfer) and the same map comes back
   //     with the same event list, the parsed map data and the spriteset are kept and put back. The sprites follow
@@ -569,8 +589,9 @@
         const r = term.apply(this, arguments);
         const next = g.SceneManager._nextScene;
         kept = null;
-        if (next && next instanceof g.Scene_MenuBase && this._spriteset && g.$gameMap && g.$dataMap && !g.$gamePlayer.isTransferring()) {
-          kept = { sp: this._spriteset, id: g.$gameMap.mapId(), dm: g.$dataMap, ev: g.$gameMap._events, n: g.$gameMap._events.length, tile: g.$gameMap._tilesetId };
+        const battle = next && next instanceof g.Scene_Battle;       // characters were hidden for the encounter effect: shown again on reuse
+        if (next && (next instanceof g.Scene_MenuBase || battle) && this._spriteset && g.$gameMap && g.$dataMap && !g.$gamePlayer.isTransferring()) {
+          kept = { sp: this._spriteset, id: g.$gameMap.mapId(), dm: g.$dataMap, ev: g.$gameMap._events, n: g.$gameMap._events.length, tile: g.$gameMap._tilesetId, battle: battle };
         }
         return r;
       };
@@ -583,6 +604,7 @@
         const gm = g.$gameMap;
         if (k && !this._transfer && gm && k.id === gm.mapId() && k.dm === g.$dataMap && k.ev === gm._events && k.n === gm._events.length && k.tile === gm._tilesetId) {
           this._spriteset = k.sp;
+          if (k.battle) for (const sp of k.sp._characterSprites) if (!sp.isTile()) sp.show();   // undo hideCharacters()
           this.addChild(this._spriteset);
           return;
         }
