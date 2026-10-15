@@ -573,6 +573,20 @@
         const sp = this._windowFrameSprite;
         sp.bitmap = hit; sp.setFrame(0, 0, w, h);
       };
+      const cursor = W._refreshCursor;
+      if (String(cursor).indexOf("_windowCursorSprite") >= 0) W._refreshCursor = function () {
+        // the cursor bitmap depends on its clipped size and the clipping offsets, not on where it is (the sprite moves)
+        const skin = this._windowskin, pad = this._padding, r = this._cursorRect;
+        if (!skin || !skin.isReady || !skin.isReady()) return cursor.apply(this, arguments);
+        const x = r.x + pad - this.origin.x, y = r.y + pad - this.origin.y, w = r.width, h = r.height;
+        const x2 = Math.max(x, pad), y2 = Math.max(y, pad), ox = x - x2, oy = y - y2;
+        const w2 = Math.min(w, this._width - pad - x2), h2 = Math.min(h, this._height - pad - y2);
+        if (!(w > 0 && h > 0 && w2 > 0 && h2 > 0)) return cursor.apply(this, arguments);
+        const key = w2 + "x" + h2 + "|" + ox + "," + oy + "|" + w + "x" + h, c = cacheFor(skin, "cursors"), hit = c.get(key);
+        if (!hit) { cursor.apply(this, arguments); c.set(key, this._windowCursorSprite.bitmap); return; }
+        const sp = this._windowCursorSprite;
+        sp.bitmap = hit; sp.setFrame(0, 0, w2, h2); sp.move(x2, y2);
+      };
     } else nx.log("port patch: window background cache not installed (source differs)");
   }
 
