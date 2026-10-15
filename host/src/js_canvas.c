@@ -1843,8 +1843,7 @@ static const JSCFunctionListEntry k_ctx_funcs[] = {
 
 void js_canvas_init(JSContext *ctx, JSValueConst nx) {
     JSRuntime *rt = JS_GetRuntime(ctx);
-    static int ready;
-    if (!ready) {
+    {   /* classes are per runtime: registered again on a soft restart (the class ids stay the same) */
         JS_NewClassID(rt, &surface_class);
         JSClassDef sdef = {"Surface", surface_finalizer};
         JS_NewClass(rt, surface_class, &sdef);
@@ -1854,7 +1853,6 @@ void js_canvas_init(JSContext *ctx, JSValueConst nx) {
         JS_NewClassID(rt, &grad_class);
         JSClassDef gdef = {"CanvasGradient", grad_finalizer};
         JS_NewClass(rt, grad_class, &gdef);
-        ready = 1;
     }
     JSValue proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, proto, k_ctx_funcs, sizeof k_ctx_funcs / sizeof k_ctx_funcs[0]);

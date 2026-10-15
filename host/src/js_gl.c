@@ -204,18 +204,50 @@ FN(pixelStorei) {
 
 /* ---- objects ---------------------------------------------------------------------------------- */
 
-FN(createBuffer) { GLuint n; glGenBuffers(1, &n); return make_obj(ctx, n); }
-FN(createFramebuffer) { GLuint n; glGenFramebuffers(1, &n); return make_obj(ctx, n); }
-FN(createRenderbuffer) { GLuint n; glGenRenderbuffers(1, &n); return make_obj(ctx, n); }
-FN(createTexture) { GLuint n; glGenTextures(1, &n); return make_obj(ctx, n); }
-FN(createProgram) { return make_obj(ctx, glCreateProgram()); }
-FN(createShader) { return make_obj(ctx, glCreateShader(U(0))); }
-FN(deleteBuffer) { GLuint n = O(0); glDeleteBuffers(1, &n); return JS_UNDEFINED; }
-FN(deleteFramebuffer) { GLuint n = O(0); glDeleteFramebuffers(1, &n); return JS_UNDEFINED; }
-FN(deleteRenderbuffer) { GLuint n = O(0); glDeleteRenderbuffers(1, &n); return JS_UNDEFINED; }
-FN(deleteTexture) { GLuint n = O(0); glDeleteTextures(1, &n); return JS_UNDEFINED; }
-FN(deleteProgram) { glDeleteProgram(O(0)); return JS_UNDEFINED; }
-FN(deleteShader) { glDeleteShader(O(0)); return JS_UNDEFINED; }
+/* Every GL object the game creates is remembered so a soft restart (mods menu Apply) can free what the old JS runtime
+ * leaves behind: JS garbage collection does not delete GL objects. */
+enum { K_BUF, K_FBO, K_RBO, K_TEX, K_PROG, K_SHADER, K_COUNT };
+static GLuint *g_track[K_COUNT];
+static int g_track_n[K_COUNT], g_track_cap[K_COUNT];
+static void track_add(int k, GLuint id) {
+    if (g_track_n[k] == g_track_cap[k]) {
+        g_track_cap[k] = g_track_cap[k] ? g_track_cap[k] * 2 : 256;
+        g_track[k] = realloc(g_track[k], g_track_cap[k] * sizeof(GLuint));
+    }
+    g_track[k][g_track_n[k]++] = id;
+}
+static void track_del(int k, GLuint id) {
+    for (int i = g_track_n[k]; i-- > 0;)
+        if (g_track[k][i] == id) { g_track[k][i] = g_track[k][--g_track_n[k]]; return; }
+}
+void js_gl_release_all(void) {
+    for (int i = 0; i < g_track_n[K_BUF]; i++) glDeleteBuffers(1, &g_track[K_BUF][i]);
+    for (int i = 0; i < g_track_n[K_FBO]; i++) glDeleteFramebuffers(1, &g_track[K_FBO][i]);
+    for (int i = 0; i < g_track_n[K_RBO]; i++) glDeleteRenderbuffers(1, &g_track[K_RBO][i]);
+    for (int i = 0; i < g_track_n[K_TEX]; i++) glDeleteTextures(1, &g_track[K_TEX][i]);
+    for (int i = 0; i < g_track_n[K_PROG]; i++) glDeleteProgram(g_track[K_PROG][i]);
+    for (int i = 0; i < g_track_n[K_SHADER]; i++) glDeleteShader(g_track[K_SHADER][i]);
+    for (int k = 0; k < K_COUNT; k++) g_track_n[k] = 0;
+    g_fb0 = 1; g_vp0_set = g_sc0_set = 0; g_flip_y = g_premultiply = 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+}
+
+FN(createBuffer) { GLuint n; glGenBuffers(1, &n); track_add(K_BUF, n); return make_obj(ctx, n); }
+FN(createFramebuffer) { GLuint n; glGenFramebuffers(1, &n); track_add(K_FBO, n); return make_obj(ctx, n); }
+FN(createRenderbuffer) { GLuint n; glGenRenderbuffers(1, &n); track_add(K_RBO, n); return make_obj(ctx, n); }
+FN(createTexture) { GLuint n; glGenTextures(1, &n); track_add(K_TEX, n); return make_obj(ctx, n); }
+FN(createProgram) { GLuint n = glCreateProgram(); track_add(K_PROG, n); return make_obj(ctx, n); }
+FN(createShader) { GLuint n = glCreateShader(U(0)); track_add(K_SHADER, n); return make_obj(ctx, n); }
+FN(deleteBuffer) { GLuint n = O(0); track_del(K_BUF, n); glDeleteBuffers(1, &n); return JS_UNDEFINED; }
+FN(deleteFramebuffer) { GLuint n = O(0); track_del(K_FBO, n); glDeleteFramebuffers(1, &n); return JS_UNDEFINED; }
+FN(deleteRenderbuffer) { GLuint n = O(0); track_del(K_RBO, n); glDeleteRenderbuffers(1, &n); return JS_UNDEFINED; }
+FN(deleteTexture) { GLuint n = O(0); track_del(K_TEX, n); glDeleteTextures(1, &n); return JS_UNDEFINED; }
+FN(deleteProgram) { GLuint n = O(0); track_del(K_PROG, n); glDeleteProgram(n); return JS_UNDEFINED; }
+FN(deleteShader) { GLuint n = O(0); track_del(K_SHADER, n); glDeleteShader(n); return JS_UNDEFINED; }
 FN(bindBuffer) { glBindBuffer(U(0), O(1)); return JS_UNDEFINED; }
 FN(bindFramebuffer) {
     GLuint fb = O(1);
@@ -556,12 +588,10 @@ static const struct {
 JSValue js_gl_create(JSContext *ctx, int width, int height) {
     g_screen_w = width;
     g_screen_h = height;
-    static int class_ready;
-    if (!class_ready) {
+    {   /* per runtime: registered again on a soft restart */
         JS_NewClassID(JS_GetRuntime(ctx), &gl_obj_class);
         JSClassDef def = {"WebGLObject"};
         JS_NewClass(JS_GetRuntime(ctx), gl_obj_class, &def);
-        class_ready = 1;
     }
     JSValue gl = JS_NewObject(ctx);
     for (size_t i = 0; i < sizeof k_funcs / sizeof k_funcs[0]; i++)

@@ -14,6 +14,8 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     const float h = display.y - margin * 2;
 
     bool applied = false;
+    const bool focusNow = focusFirst_;
+    if (focusNow) ImGui::SetNextWindowFocus();             // the pad starts in the mod list, not in the details pane
     ImGui::SetNextWindowPos(ImVec2(margin, margin));
     ImGui::SetNextWindowSize(ImVec2(leftW, h));
     ImGui::Begin(header.title.c_str(), nullptr,
@@ -66,6 +68,7 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     ImGui::End();
 
     infoPane(ImVec2(margin + leftW + gap, margin), ImVec2(display.x - margin * 2 - leftW - gap, h));
+    if (focusNow) focusFirst_ = false;
     return applied;
 }
 
@@ -97,6 +100,7 @@ void ModMenuUi::tabMods() {
         ImGui::PushID((int)i);
         bool on = rows[i].enabled;
         if (ImGui::Checkbox("##on", &on)) model_.toggle(i);
+        if (focusFirst_ && i == selected_) ImGui::SetItemDefaultFocus();
         ImGui::SameLine();
         std::string label = m ? m->name : rows[i].id;
         if (ImGui::Selectable(label.c_str(), selected_ == i)) selected_ = i;
@@ -156,7 +160,8 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
     ImGui::SetNextWindowSize(size);
     ImGui::Begin("Details", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                     ImGuiWindowFlags_NoSavedSettings);
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // read-only: the pad stays on the list
 
     const Mod* m = model_.mod(selected_);
     if (!m) {
@@ -180,9 +185,9 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
         for (auto& o : ov) if (o.winner != m->id) lost++;
         ImGui::TextColored(kWarn, "%zu shared with other enabled mods, %d won by them", ov.size(), lost);
     }
-    if (ImGui::BeginChild("files", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
-        for (const std::string& f : m->files) ImGui::TextUnformatted(f.c_str());
-    }
-    ImGui::EndChild();
+    // A plain list, not a scrolling child: a child window with nothing selectable in it still takes the pad's focus.
+    const size_t maxShown = 9;
+    for (size_t i = 0; i < m->files.size() && i < maxShown; i++) ImGui::TextUnformatted(m->files[i].c_str());
+    if (m->files.size() > maxShown) ImGui::TextColored(kDim, "... and %zu more", m->files.size() - maxShown);
     ImGui::End();
 }

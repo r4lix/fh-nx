@@ -158,6 +158,12 @@ bool ModManager::saveConfig(const std::string& iniPath) const {
         if (!f) return false;
     }
     fs::rename(tmp, iniPath, ec);     // an interrupted write must not leave a half-written ini
+    if (ec) {                         // FAT (the Switch's SD card) cannot rename over an existing file
+        std::error_code ec2;
+        fs::remove(iniPath, ec2);
+        ec.clear();
+        fs::rename(tmp, iniPath, ec);
+    }
     return !ec;
 }
 

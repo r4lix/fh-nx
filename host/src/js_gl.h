@@ -3,6 +3,8 @@
 
 /* Builds the WebGL1 context object (all functions and constants) backed by the current GLES2
  * context. width/height become drawingBufferWidth/Height. */
+/* Delete every GL object the game still holds and reset the layer's state (soft restart). */
+void js_gl_release_all(void);
 JSValue js_gl_create(JSContext *ctx, int width, int height);
 
 /* Per-frame GL call cost, for the host's stats line: ticks spent inside texture uploads, draws and buffer

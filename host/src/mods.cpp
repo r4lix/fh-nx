@@ -89,6 +89,10 @@ JSValue js_mod_plugins(JSContext* ctx, JSValueConst, int, JSValueConst*) {
 
 extern "C" int mods_init(const char* www, const char* modsDir, const char* ini) {
     ModsState& s = mods_state();
+    if (s.model) {                                  // a soft restart: the menu already applied its changes to the manager
+        s.vfs->setMods(s.mm.enabledDirs());
+        return (int)s.mm.mods().size();
+    }
     s.www = www;
     s.modsDir = modsDir;
     s.ini = ini;

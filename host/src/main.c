@@ -17,6 +17,7 @@
 #include "js_canvas.h"
 #include "js_gl.h"
 #include "mods.h"
+#include "mods_menu.h"
 #include "nx_common.h"
 #include "quickjs.h"
 
@@ -30,6 +31,11 @@ static volatile int g_quit;
 /* pad state, written by the main thread, read by the worker through nx.pad() */
 static volatile u64 g_buttons;
 static volatile int g_stick[4];
+static volatile int g_touch, g_touch_x, g_touch_y;       /* touch screen, 1280x720 pixels */
+static volatile int g_menu_req;                          /* set by the main thread: hold - for 2 s */
+static volatile int g_mute;                              /* frames of pad input hidden from the game after the menu closes */
+static volatile int g_relaunch;                          /* Apply: start this NRO again so the mods take effect */
+static char g_nro[512];
 
 static void say(const char *fmt, ...) {
     va_list a;
@@ -84,15 +90,21 @@ static void egl_stop(void) {
 /* ---- the platform half of __nx ------------------------------------------------------------------ */
 
 static JSValue nx_pad(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-    u64 b = g_buttons;
+    u64 b = g_mute > 0 ? 0 : g_buttons;
     JSValue a = JS_NewArray(ctx);
     JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)(b & 0xffffffffu)));
     JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, (double)(b >> 32)));
-    for (int i = 0; i < 4; i++) JS_SetPropertyUint32(ctx, a, 2 + i, JS_NewInt32(ctx, g_stick[i]));
+    for (int i = 0; i < 4; i++) JS_SetPropertyUint32(ctx, a, 2 + i, JS_NewInt32(ctx, g_mute > 0 ? 0 : g_stick[i]));
     return a;
 }
 
 static JSRuntime *s_rt;
+
+/* nx.openMenu(): open the mods menu from script (also how tests reach it without a 2 s hold) */
+static JSValue nx_open_menu(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    g_menu_req = 1;
+    return JS_UNDEFINED;
+}
 
 /* nx.gc(): run one full collection and return its duration in ms (device-side probe). */
 static JSValue nx_gc(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
@@ -131,10 +143,10 @@ static int run_file(JSContext *ctx, const char *path) {
 
 /* ---- worker ------------------------------------------------------------------------------------- */
 
-static void worker(void *arg) {
-    (void)arg;
-    if (!egl_start()) { g_quit = 1; return; }
-
+/* One run of the game: a fresh QuickJS runtime booting MV. Returns 1 when the mods menu asked for a restart (Apply),
+ * so the same process starts the game again with the new mod set; 0 when the app should exit. */
+static int run_session(void) {
+    int restart = 0;
     JSRuntime *rt = JS_NewRuntime2(js_fast_malloc_functions(), NULL);       /* pool allocator: see js_alloc.h */
     JS_SetMaxStackSize(rt, 8u << 20);
     s_rt = rt;
@@ -145,6 +157,7 @@ static void worker(void *arg) {
     nx_common_init(ctx, nx, BASE "/www", log_line);
     JS_SetPropertyStr(ctx, nx, "saveDir", JS_NewString(ctx, BASE "/save"));
     JS_SetPropertyStr(ctx, nx, "pad", JS_NewCFunction(ctx, nx_pad, "pad", 0));
+    JS_SetPropertyStr(ctx, nx, "openMenu", JS_NewCFunction(ctx, nx_open_menu, "openMenu", 0));
     JS_SetPropertyStr(ctx, nx, "gc", JS_NewCFunction(ctx, nx_gc, "gc", 0));
     JS_SetPropertyStr(ctx, nx, "mem", JS_NewCFunction(ctx, nx_mem, "mem", 0));
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, WIDTH));
@@ -166,9 +179,31 @@ static void worker(void *arg) {
     int errors = 0;
     u64 frames = 0, t_js = 0, t_swap = 0;
     u64 t0 = armGetSystemTick();
+    int menu_ok = menu_init(BASE "/www/fonts/Eczar-Regular.ttf", "Fear & Hunger NX"), menu_open = 0;
+    say("mods menu: %s\n", menu_ok ? "ready (hold - for 2 s)" : "unavailable");
 
     while (ok && !g_quit) {
         u64 a = armGetSystemTick();
+        if (g_menu_req && menu_ok && !menu_open) { menu_open = 1; g_menu_req = 0; menu_reset_focus(); }
+        if (menu_open) {
+            /* the menu owns the screen: the game is not ticked while it is open */
+            MenuInput in = {g_buttons, g_stick[0], g_stick[1], g_touch, g_touch_x, g_touch_y, NULL};
+            int r = menu_frame(&in);
+            eglSwapBuffers(s_display, s_surface);
+            if (r == MENU_APPLIED) { restart = 1; break; }
+            else if (r == MENU_CLOSED) {
+                menu_release_gl();
+                menu_open = 0;
+                g_mute = 20;                                  /* the closing press must not reach the game */
+                JSValue f = JS_GetPropertyStr(ctx, g, "__menuClosed");
+                if (JS_IsFunction(ctx, f)) { JSValue rr = JS_Call(ctx, f, JS_UNDEFINED, 0, NULL); JS_FreeValue(ctx, rr); }
+                JS_FreeValue(ctx, f);
+            }
+            u64 spent = armGetSystemTick() - a, budget = armGetSystemTickFreq() / 60;
+            if (spent < budget) svcSleepThread(armTicksToNs(budget - spent));
+            continue;
+        }
+        if (g_mute > 0) g_mute--;
         JSValue arg = JS_NewFloat64(ctx, (double)armTicksToNs(a) / 1e6);
         JSValue r = JS_Call(ctx, tick, JS_UNDEFINED, 1, &arg);
         JS_FreeValue(ctx, arg);
@@ -207,16 +242,27 @@ static void worker(void *arg) {
     JS_FreeValue(ctx, g);
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
+    js_gl_release_all();
+    return restart;
+}
+
+static void worker(void *arg) {
+    (void)arg;
+    if (!egl_start()) { g_quit = 1; return; }
+    while (!g_quit && run_session()) say("restarting the game with the new mod set\n");
     egl_stop();
     g_quit = 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     g_log = fopen(BASE "/log.txt", "w");
     say("fh-nx host\n");
+    snprintf(g_nro, sizeof g_nro, "%s", argc > 0 && argv[0] ? argv[0] : BASE "/../fh-nx.nro");
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     PadState pad;
     padInitializeDefault(&pad);
+    hidInitializeTouchScreen();
+    u64 minus_since = 0;
 
     Thread th;
     if (R_FAILED(threadCreate(&th, worker, NULL, NULL, 16u << 20, 0x2C, -2))) {
@@ -230,6 +276,14 @@ int main(void) {
         g_buttons = held;
         HidAnalogStickState l = padGetStickPos(&pad, 0), r = padGetStickPos(&pad, 1);
         g_stick[0] = l.x; g_stick[1] = l.y; g_stick[2] = r.x; g_stick[3] = r.y;
+        HidTouchScreenState ts = {0};
+        if (hidGetTouchScreenStates(&ts, 1) && ts.count > 0) { g_touch = 1; g_touch_x = (int)ts.touches[0].x; g_touch_y = (int)ts.touches[0].y; }
+        else g_touch = 0;
+        if (held & HidNpadButton_Minus) {                                   /* hold - for 2 s: the mods menu */
+            u64 now = armGetSystemTick();
+            if (!minus_since) minus_since = now;
+            else if (now - minus_since > 2 * armGetSystemTickFreq()) { g_menu_req = 1; minus_since = 0; }
+        } else minus_since = 0;
         if (padGetButtonsDown(&pad) & HidNpadButton_Plus) g_quit = 1;       /* dev: + quits */
         svcSleepThread(4000000ULL);
     }

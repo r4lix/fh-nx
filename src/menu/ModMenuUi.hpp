@@ -25,6 +25,9 @@ public:
     // L/R on the pad: -1 / +1 moves the tab selection.
     void stepTab(int dir) { tabStep_ = dir; }
 
+    // Put the pad/keyboard focus on the first control again (call when the menu is opened).
+    void resetFocus() { focusFirst_ = true; }
+
     // Where the Apply/Reset buttons were drawn last frame, so tests can click them.
     struct Rects { ImVec2 apply, reset, master; };
     const Rects& rects() const { return rects_; }
@@ -34,6 +37,7 @@ private:
     size_t selected_ = 0;
     int tab_ = 0;
     int tabStep_ = 0;
+    bool focusFirst_ = true;
     ModMenuModel::Plan applied_;
     bool applyFailed_ = false;
     Rects rects_;

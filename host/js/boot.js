@@ -755,6 +755,8 @@
   step("plugins loaded");
   g.window.onload();                                  // SceneManager.run(Scene_Boot)
   step("SceneManager.run");
+  // the native mods menu took over the screen and changed GL state behind PIXI's back: resync its caches
+  g.__menuClosed = function () { try { g.Graphics._renderer.reset(); } catch (e) { nx.log("menuClosed: " + e); } };
   try { __loadScript("js/dev_extra.js"); nx.log("dev_extra.js loaded"); } catch (e) { /* optional device-side probe script */ }
 
   // scene graph dump for debugging what is on screen (depth-limited)
