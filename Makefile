@@ -3,7 +3,7 @@ CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra
 
 CORE := src/core/Json.cpp src/vfs/Vfs.cpp src/vfs/ModManager.cpp
-MENU := src/menu/ModMenuModel.cpp
+MENU := src/menu/ModMenuModel.cpp src/menu/ControlsModel.cpp
 HDRS := $(wildcard src/*/*.hpp)
 IMGUI := $(wildcard third_party/imgui/*.cpp)
 UI    := src/menu/ModMenuUi.cpp
@@ -35,7 +35,7 @@ build/canvas_host: tests/canvas_host.c $(HOST_DEPS)
 	@mkdir -p build
 	$(CC) $(HOST_CF) tests/canvas_host.c $(HOST_C) $(QJS_C) -lm -lpthread -o $@
 # the mods subsystem is C++: compile it to objects and link the whole host with g++
-MODS_CPP := host/src/mods.cpp src/vfs/Vfs.cpp src/vfs/ModManager.cpp src/core/Json.cpp src/menu/ModMenuModel.cpp
+MODS_CPP := host/src/mods.cpp src/vfs/Vfs.cpp src/vfs/ModManager.cpp src/core/Json.cpp src/menu/ModMenuModel.cpp src/menu/ControlsModel.cpp
 MODS_OBJ := $(patsubst %.cpp,build/mods_obj/%.o,$(MODS_CPP))
 build/mods_obj/%.o: %.cpp host/src/mods.h host/src/mods_state.hpp
 	@mkdir -p $(dir $@)

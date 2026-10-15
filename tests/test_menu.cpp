@@ -1,4 +1,5 @@
 // Host-side tests for ModMenuModel: staging, Apply/Reset, and the cost plan.
+#include "../src/menu/ControlsModel.hpp"
 #include "../src/menu/ModMenuModel.hpp"
 #include <cstdio>
 #include <filesystem>
@@ -112,6 +113,25 @@ int main() {
     fresh.loadConfig(ini.string());
     CHECK(!fresh.active());
     CHECK(fresh.find("cheat")->enabled && fresh.find("art")->enabled);
+
+    // --- controls: defaults, swap on conflict, persistence, junk files
+    {
+        auto cini = (root / "controls.ini").string();
+        ControlsModel c(cini);
+        c.load();
+        CHECK(c.isDefault() && c.button(0) == "A" && c.button(4) == "L");
+        c.cycle(0, +1);                                               // Confirm A -> B, so Cancel (B) takes A
+        CHECK(c.button(0) == "B" && c.button(1) == "A");
+        CHECK(c.save());
+        ControlsModel d(cini);
+        d.load();
+        CHECK(d.button(0) == "B" && d.button(1) == "A" && !d.isDefault());
+        CHECK(d.toJson().find("\"ok\":\"B\"") != std::string::npos);
+        { std::ofstream f(cini, std::ios::trunc); f << "[controls]\nok=A\ncancel=A\n"; }
+        ControlsModel e(cini);
+        e.load();
+        CHECK(e.isDefault());                                         // one button twice: the file is ignored
+    }
 
     fs::remove_all(root);
     std::printf(failures ? "%d FAILED\n" : "menu tests passed\n", failures);

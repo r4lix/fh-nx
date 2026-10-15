@@ -39,7 +39,7 @@ build/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/audio_mix.h s
 	$(CC) $(CFLAGS) $(AUDIO_INC) -c $< -o $@
 # the mods subsystem (layered file view, mod manager, menu model) is C++
 CXXFLAGS_HOST := -DIMGUI_DISABLE_DEBUG_TOOLS -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS -std=gnu++17 -O2 -g $(ARCH) -D__SWITCH__ -I$(DEVKITPRO)/libnx/include -I$(PORTLIBS)/include -I$(QJS) -I../third_party/imgui -w
-MODS_SRC := src/mods.cpp src/mods_menu.cpp ../src/vfs/Vfs.cpp ../src/vfs/ModManager.cpp ../src/core/Json.cpp ../src/menu/ModMenuModel.cpp ../src/menu/ModMenuUi.cpp ../third_party/imgui/imgui.cpp ../third_party/imgui/imgui_draw.cpp ../third_party/imgui/imgui_tables.cpp ../third_party/imgui/imgui_widgets.cpp
+MODS_SRC := src/mods.cpp src/mods_menu.cpp ../src/vfs/Vfs.cpp ../src/vfs/ModManager.cpp ../src/core/Json.cpp ../src/menu/ModMenuModel.cpp ../src/menu/ControlsModel.cpp ../src/menu/ModMenuUi.cpp ../third_party/imgui/imgui.cpp ../third_party/imgui/imgui_draw.cpp ../third_party/imgui/imgui_tables.cpp ../third_party/imgui/imgui_widgets.cpp
 MODS_OBJ := $(addprefix build/mods_,$(addsuffix .o,$(notdir $(basename $(MODS_SRC)))))
 $(foreach f,$(MODS_SRC),$(eval build/mods_$(notdir $(basename $(f))).o: $(f) src/mods.h src/mods_state.hpp src/mods_menu.h ; @mkdir -p build ; $(CXX) $(CXXFLAGS_HOST) -c $$< -o $$@))
 # linked with g++: Mesa's EGL is C++

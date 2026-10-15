@@ -50,6 +50,8 @@ bool parseMod(const fs::path& dir, Mod& m, std::string& err) {
     m.version = j.str("version");
     m.author = j.str("author");
     m.description = j.str("description");
+    m.url = j.str("url");
+    m.tested = j.boolean("tested");
     m.affectsSaves = j.boolean("affects_saves");
 
     if (const Json* ps = j.get("plugins")) {

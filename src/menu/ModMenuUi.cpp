@@ -1,7 +1,14 @@
 #include "ModMenuUi.hpp"
 #include <algorithm>
+#include <cctype>
+#include <vector>
 
 namespace {
+
+std::string lowerStr(std::string s) {
+    for (char& c : s) c = (char)std::tolower((unsigned char)c);
+    return s;
+}
 
 const ImVec4 kWarn(1.0f, 0.78f, 0.25f, 1.0f);
 const ImVec4 kDim(0.62f, 0.66f, 0.72f, 1.0f);
@@ -32,14 +39,22 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     }
 
     if (ImGui::BeginTabBar("tabs")) {
-        const char* names[] = {"Mods", "Plugins", "Help"};
-        if (tabStep_ != 0) tab_ = (tab_ + tabStep_ + 3) % 3;
-        for (int i = 0; i < 3; i++) {
+        enum { kMods, kControls, kPlugins, kHelp };
+        std::vector<int> ids = {kMods};
+        if (controls_) ids.push_back(kControls);
+        ids.push_back(kPlugins);
+        ids.push_back(kHelp);
+        const char* names[] = {"Mods", "Controls", "Plugins", "Help"};
+        const int n = (int)ids.size();
+        if (tabStep_ != 0) tab_ = (tab_ + tabStep_ + n) % n;
+        for (int i = 0; i < n; i++) {
             ImGuiTabItemFlags f = (tabStep_ != 0 && tab_ == i) ? ImGuiTabItemFlags_SetSelected : 0;
-            if (ImGui::BeginTabItem(names[i], nullptr, f)) {
+            if (ImGui::BeginTabItem(names[ids[i]], nullptr, f)) {
                 if (tabStep_ == 0) tab_ = i;
-                if (i == 0) tabMods();
-                else if (i == 1) tabPlugins();
+                tabId_ = ids[i];
+                if (ids[i] == kMods) tabMods();
+                else if (ids[i] == kControls) tabControls();
+                else if (ids[i] == kPlugins) tabPlugins();
                 else tabHelp();
                 ImGui::EndTabItem();
             }
@@ -67,7 +82,7 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     ImGui::EndDisabled();
     ImGui::End();
 
-    infoPane(ImVec2(marginX + leftW + gap, marginY), ImVec2(display.x - marginX * 2 - leftW - gap, 190.f));
+    infoPane(ImVec2(marginX + leftW + gap, marginY), ImVec2(display.x - marginX * 2 - leftW - gap, 240.f));
     if (focusNow) focusFirst_ = false;
     return applied;
 }
@@ -92,18 +107,40 @@ void ModMenuUi::tabMods() {
     }
     if (selected_ >= rows.size()) selected_ = rows.size() - 1;
 
+    static const char* sortNames[] = {"Load order", "Name", "Enabled first", "Author", "Tested first"};
+    if (ImGui::Button((std::string("Sort: ") + sortNames[sort_]).c_str())) sort_ = (sort_ + 1) % 5;
+    ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
-    ImGui::TextWrapped("Load order: top loads first, bottom wins conflicts");
+    ImGui::TextUnformatted(sort_ == 0 ? "top loads first, bottom wins" : "display only");
     ImGui::PopStyleColor();
-    for (size_t i = 0; i < rows.size(); i++) {
+
+    std::vector<size_t> order(rows.size());
+    for (size_t i = 0; i < order.size(); i++) order[i] = i;
+    auto nameOf = [&](size_t i) { const Mod* m = model_.mod(i); return lowerStr(m ? m->name : rows[i].id); };
+    auto authorOf = [&](size_t i) { const Mod* m = model_.mod(i); return lowerStr(m ? m->author : std::string()); };
+    auto testedOf = [&](size_t i) { const Mod* m = model_.mod(i); return m && m->tested; };
+    switch (sort_) {
+    case 1: std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return nameOf(a) < nameOf(b); }); break;
+    case 2: std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return rows[a].enabled > rows[b].enabled; }); break;
+    case 3: std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return authorOf(a) < authorOf(b); }); break;
+    case 4: std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return testedOf(a) > testedOf(b); }); break;
+    default: break;
+    }
+
+    for (size_t k = 0; k < order.size(); k++) {
+        size_t i = order[k];
         const Mod* m = model_.mod(i);
         ImGui::PushID((int)i);
         bool on = rows[i].enabled;
         if (ImGui::Checkbox("##on", &on)) model_.toggle(i);
-        if (focusFirst_ && i == selected_) ImGui::SetItemDefaultFocus();
+        if (focusFirst_ && k == 0) ImGui::SetItemDefaultFocus();
         ImGui::SameLine();
         std::string label = m ? m->name : rows[i].id;
         if (ImGui::Selectable(label.c_str(), selected_ == i)) selected_ = i;
+        if (m && !m->tested) {
+            ImGui::SameLine();
+            ImGui::TextColored(kDim, "(untested)");
+        }
         if (m && m->affectsSaves) {
             ImGui::SameLine();
             ImGui::TextColored(kWarn, "(saves)");
@@ -112,6 +149,7 @@ void ModMenuUi::tabMods() {
     }
 
     ImGui::Spacing();
+    ImGui::BeginDisabled(sort_ != 0);                      // moving only makes sense in load order
     if (ImGui::Button("Move up")) {
         if (model_.moveUp(selected_)) selected_--;
     }
@@ -119,6 +157,34 @@ void ModMenuUi::tabMods() {
     if (ImGui::Button("Move down")) {
         if (model_.moveDown(selected_)) selected_++;
     }
+    ImGui::EndDisabled();
+}
+
+void ModMenuUi::tabControls() {
+    ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+    ImGui::TextWrapped("Press A on an action to move it to the next button. Taking a button that is already used swaps the two.");
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+    const auto& acts = ControlsModel::actions();
+    for (size_t i = 0; i < acts.size(); i++) {
+        ImGui::PushID((int)i);
+        std::string btn = controls_->button(i);
+        std::string text = std::string(acts[i].label) + ":  " + (btn == "STICK_L" ? "L stick click" : btn == "STICK_R" ? "R stick click" : btn);
+        if (ImGui::Button(text.c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+            controls_->cycle(i, +1);
+            controls_->save();
+        }
+        if (ImGui::IsItemFocused() || ImGui::IsItemHovered()) control_ = i;
+        if (focusFirst_ && i == 0) ImGui::SetItemDefaultFocus();
+        ImGui::PopID();
+    }
+    ImGui::Spacing();
+    ImGui::BeginDisabled(controls_->isDefault());
+    if (ImGui::Button("Reset to defaults")) {
+        controls_->resetDefaults();
+        controls_->save();
+    }
+    ImGui::EndDisabled();
 }
 
 void ModMenuUi::tabPlugins() {
@@ -149,6 +215,10 @@ void ModMenuUi::tabHelp() {
     ImGui::TextWrapped("Image, audio and data mods apply by reloading assets. Mods that add plugins "
                        "or change plugin settings also restart the game runtime (not your save).");
     ImGui::Spacing();
+    ImGui::TextColored(kDim, "(untested)");
+    ImGui::SameLine();
+    ImGui::TextWrapped("marks a mod nobody has run on a Switch yet. It may not work.");
+    ImGui::Spacing();
     ImGui::TextColored(kWarn, "(saves)");
     ImGui::SameLine();
     ImGui::TextWrapped("marks a mod that changes data existing saves depend on. Toggling it can "
@@ -163,6 +233,14 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // read-only: the pad stays on the list
 
+    if (tabId_ == 1 && controls_) {
+        const auto& a = ControlsModel::actions()[control_];
+        ImGui::TextUnformatted(a.label);
+        ImGui::TextColored(kDim, "default: %s", a.defaultButton);
+        ImGui::TextWrapped("%s", a.help);
+        ImGui::End();
+        return;
+    }
     const Mod* m = model_.mod(selected_);
     if (!m) {
         ImGui::TextColored(kDim, "Select a mod");
@@ -175,6 +253,9 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
                            (!m->version.empty() && !m->author.empty()) ? "  by " : (m->author.empty() ? "" : "by "),
                            m->author.c_str());
     if (!m->description.empty()) ImGui::TextWrapped("%s", m->description.c_str());
+    if (!m->url.empty()) ImGui::TextColored(kDim, "%s", m->url.c_str());
+    if (m->tested) ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.5f, 1.f), "Tested on a Switch");
+    else ImGui::TextColored(kWarn, "Untested on a Switch");
     if (m->affectsSaves) ImGui::TextColored(kWarn, "Changes data that existing saves rely on.");
 
     ImGui::Separator();

@@ -108,6 +108,9 @@
   const DISABLED = ["DSE-AudioLagFix"];
   for (const p of g.$plugins) if (DISABLED.includes(p.name) && p.status) { p.status = false; nx.log("port patch: plugin " + p.name + " disabled"); }
 
+  g.__applyControls();                                // the plugins (AS_InputSettings) set the pad map during main.js; ours wins after it
+  const __setup = g.PluginManager.setup;
+  g.PluginManager.setup = function () { const r = __setup.apply(this, arguments); g.__applyControls(); return r; };
   __loadScript("js/main.js");                         // PluginManager.setup($plugins); window.onload = ...
 
   // ---- Engine port patches for a bytecode interpreter (QuickJS is ~10-30x slower than the browser JIT this
@@ -787,7 +790,7 @@
   g.window.onload();                                  // SceneManager.run(Scene_Boot)
   step("SceneManager.run");
   // the native mods menu took over the screen and changed GL state behind PIXI's back: resync its caches
-  g.__menuClosed = function () { try { g.Graphics._renderer.reset(); } catch (e) { nx.log("menuClosed: " + e); } };
+  g.__menuClosed = function () { try { g.__applyControls(); g.Graphics._renderer.reset(); } catch (e) { nx.log("menuClosed: " + e); } };
   try { __loadScript("js/dev_extra.js"); nx.log("dev_extra.js loaded"); } catch (e) { /* optional device-side probe script */ }
 
   // scene graph dump for debugging what is on screen (depth-limited)

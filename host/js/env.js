@@ -316,6 +316,17 @@
   const BIT = { A: 0, B: 1, X: 2, Y: 3, STICK_L: 4, STICK_R: 5, L: 6, R: 7, ZL: 8, ZR: 9, PLUS: 10, MINUS: 11, LEFT: 12, UP: 13, RIGHT: 14, DOWN: 15 };
   const STD = [BIT.A, BIT.B, BIT.Y, BIT.X, BIT.L, BIT.R, BIT.ZL, BIT.ZR, BIT.MINUS, BIT.PLUS, BIT.STICK_L, BIT.STICK_R, BIT.UP, BIT.DOWN, BIT.LEFT, BIT.RIGHT];
   const gamepad = { id: "Nintendo Switch", index: 0, connected: true, mapping: "standard", buttons: STD.map(() => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0] };
+  // The pad map comes from the mods menu's Controls tab (controls.ini); the d-pad is fixed. A key not in MV's own list
+  // ("c", "t": Phase Step, torch) works as a button name because the game's plugins poll Input by name.
+  g.__applyControls = function () {
+    if (!nx.controls || !g.Input) return;
+    let c = null;
+    try { c = JSON.parse(nx.controls()); } catch (e) {}
+    if (!c) return;
+    const m = { 12: "up", 13: "down", 14: "left", 15: "right" };
+    for (const sym in c) { const i = STD.indexOf(BIT[c[sym]]); if (i >= 0) m[i] = sym; }
+    g.Input.gamepadMapper = m;
+  };
   function getGamepads() {
     if (!nx.pad) return [];
     const p = nx.pad();

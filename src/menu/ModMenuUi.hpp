@@ -1,4 +1,5 @@
 #pragma once
+#include "ControlsModel.hpp"
 #include "ModMenuModel.hpp"
 #include "imgui.h"
 #include <string>
@@ -13,7 +14,8 @@ public:
         std::string status;    // right-aligned: clock / fps, may be empty
     };
 
-    explicit ModMenuUi(ModMenuModel& model) : model_(model) {}
+    // `controls` (optional) adds the Controls tab; it is saved as soon as a binding changes.
+    explicit ModMenuUi(ModMenuModel& model, ControlsModel* controls = nullptr) : model_(model), controls_(controls) {}
 
     // Call once per frame between NewFrame() and Render(). Returns true on the frame the
     // player pressed Apply; lastApplied() then holds what that cost (reload / restart).
@@ -34,8 +36,12 @@ public:
 
 private:
     ModMenuModel& model_;
+    ControlsModel* controls_;
     size_t selected_ = 0;
+    int sort_ = 0;                 // how the mod list is shown; the load order itself never changes with it
+    size_t control_ = 0;
     int tab_ = 0;
+    int tabId_ = 0;                // which tab was drawn last (0 mods, 1 controls, 2 plugins, 3 help)
     int tabStep_ = 0;
     bool focusFirst_ = true;
     ModMenuModel::Plan applied_;
@@ -43,6 +49,7 @@ private:
     Rects rects_;
 
     void tabMods();
+    void tabControls();
     void tabPlugins();
     void tabHelp();
     void infoPane(ImVec2 pos, ImVec2 size);

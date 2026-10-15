@@ -203,7 +203,7 @@ extern "C" int menu_init(const char* ttfPath, const char* title) {
     io.Fonts->SetTexID((ImTextureID)(intptr_t)g.fontTex);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    g.ui = std::make_unique<ModMenuUi>(*s.model);
+    g.ui = std::make_unique<ModMenuUi>(*s.model, s.controls.get());
     g.title = title ? title : "Fear & Hunger";
     g.ready = true;
     return 1;

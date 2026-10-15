@@ -65,6 +65,13 @@ JSValue js_mod_resolve(JSContext* ctx, JSValueConst, int argc, JSValueConst* arg
     return a;
 }
 
+JSValue js_controls(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    ModsState& s = mods_state();
+    if (!s.controls) return JS_NULL;
+    s.controls->load();                                 // the menu saves straight to the file; pick up what it wrote
+    return JS_NewString(ctx, s.controls->toJson().c_str());
+}
+
 JSValue js_mod_plugins(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     ModsState& s = mods_state();
     std::string out = "{\"plugins\":[";
@@ -101,10 +108,15 @@ extern "C" int mods_init(const char* www, const char* modsDir, const char* ini) 
     s.vfs = std::make_unique<Vfs>(www);
     s.vfs->setMods(s.mm.enabledDirs());
     s.model = std::make_unique<ModMenuModel>(s.mm, ini);
+    std::string c = ini;
+    size_t slash = c.find_last_of('/');
+    s.controls = std::make_unique<ControlsModel>((slash == std::string::npos ? std::string() : c.substr(0, slash + 1)) + "controls.ini");
+    s.controls->load();
     return (int)n;
 }
 
 extern "C" void mods_js_init(JSContext* ctx, JSValueConst nx) {
     JS_SetPropertyStr(ctx, nx, "modResolve", JS_NewCFunction(ctx, js_mod_resolve, "modResolve", 1));
+    JS_SetPropertyStr(ctx, nx, "controls", JS_NewCFunction(ctx, js_controls, "controls", 0));
     JS_SetPropertyStr(ctx, nx, "modPlugins", JS_NewCFunction(ctx, js_mod_plugins, "modPlugins", 0));
 }

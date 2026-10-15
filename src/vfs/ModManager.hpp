@@ -22,6 +22,8 @@ struct Mod {
     std::string dir;           // absolute path to the mod folder
     std::string name, version, author, description;
     bool enabled = false;
+    std::string url;           // where the mod comes from (credit / support link)
+    bool tested = false;       // ran on real hardware; the menu marks the rest as untested
     bool affectsSaves = false; // menu warns before toggling: it changes data existing saves rely on
     std::vector<PluginEntry> plugins;
     std::vector<ParamOverride> paramOverrides;
