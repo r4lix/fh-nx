@@ -688,6 +688,21 @@
     };
   }
 
+  // 15. A "middle" message on the map is centred on the screen, which is where the camera keeps the player: the box
+  //     hides them. When it would cover the player, park it at the top or bottom, whichever is farther from them.
+  if (g.Window_Message && g.Game_Player) {
+    const WM = g.Window_Message.prototype, place = WM.updatePlacement;
+    WM.updatePlacement = function () {
+      place.apply(this, arguments);
+      const sc = g.SceneManager._scene;
+      if (this._positionType !== 1 || !sc || !g.Scene_Map || !(sc instanceof g.Scene_Map) || !g.$gamePlayer) return;
+      const feet = g.$gamePlayer.screenY(), head = feet - 48;
+      if (feet < this.y || head > this.y + this.height) return;
+      this.y = feet > g.Graphics.boxHeight / 2 ? 0 : g.Graphics.boxHeight - this.height;
+      this._goldWindow.y = this.y > 0 ? 0 : g.Graphics.boxHeight - this._goldWindow.height;
+    };
+  }
+
   // 14. YEP_GabWindow draws map "gab" lines at a fixed Y (560) which sits inside the message window's area, so a
   //     dialog box and a gab cover each other. While a message is on screen the gab bar moves up above the box.
   if (g.Window_Gab) {

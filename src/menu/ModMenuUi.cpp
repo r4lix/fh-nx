@@ -9,14 +9,14 @@ const ImVec4 kDim(0.62f, 0.66f, 0.72f, 1.0f);
 } // namespace
 
 bool ModMenuUi::draw(const Header& header, ImVec2 display) {
-    const float margin = 40.f, gap = 16.f;
-    const float leftW = std::max(360.f, display.x * 0.40f);
-    const float h = display.y - margin * 2;
+    const float marginX = 40.f, marginY = 36.f, gap = 20.f;
+    const float leftW = std::max(360.f, display.x * 0.43f);
+    const float h = display.y - marginY * 2;
 
     bool applied = false;
     const bool focusNow = focusFirst_;
     if (focusNow) ImGui::SetNextWindowFocus();             // the pad starts in the mod list, not in the details pane
-    ImGui::SetNextWindowPos(ImVec2(margin, margin));
+    ImGui::SetNextWindowPos(ImVec2(marginX, marginY));
     ImGui::SetNextWindowSize(ImVec2(leftW, h));
     ImGui::Begin(header.title.c_str(), nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
@@ -67,7 +67,7 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     ImGui::EndDisabled();
     ImGui::End();
 
-    infoPane(ImVec2(margin + leftW + gap, margin), ImVec2(display.x - margin * 2 - leftW - gap, h));
+    infoPane(ImVec2(marginX + leftW + gap, marginY), ImVec2(display.x - marginX * 2 - leftW - gap, 190.f));
     if (focusNow) focusFirst_ = false;
     return applied;
 }
@@ -185,9 +185,5 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
         for (auto& o : ov) if (o.winner != m->id) lost++;
         ImGui::TextColored(kWarn, "%zu shared with other enabled mods, %d won by them", ov.size(), lost);
     }
-    // A plain list, not a scrolling child: a child window with nothing selectable in it still takes the pad's focus.
-    const size_t maxShown = 9;
-    for (size_t i = 0; i < m->files.size() && i < maxShown; i++) ImGui::TextUnformatted(m->files[i].c_str());
-    if (m->files.size() > maxShown) ImGui::TextColored(kDim, "... and %zu more", m->files.size() - maxShown);
     ImGui::End();
 }

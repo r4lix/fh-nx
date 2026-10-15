@@ -21,6 +21,8 @@ enum { MENU_OPEN = 0, MENU_CLOSED = 1, MENU_APPLIED = 2 };
 int menu_init(const char *ttfPath, const char *title);
 /* One frame of the open menu: draws it and returns MENU_OPEN / MENU_CLOSED (B on the top level) / MENU_APPLIED. */
 int menu_frame(const MenuInput *in);
+/* Copy the frame just drawn (call after the game's draw, before the swap) to show it dimmed behind the menu. */
+void menu_snapshot(void);
 /* Put the pad focus on the first control (call when the menu opens). */
 void menu_reset_focus(void);
 /* Reset the screen state the menu changed so the game's own GL layer can carry on. */

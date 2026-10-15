@@ -184,7 +184,8 @@ static int run_session(void) {
 
     while (ok && !g_quit) {
         u64 a = armGetSystemTick();
-        if (g_menu_req && menu_ok && !menu_open) { menu_open = 1; g_menu_req = 0; menu_reset_focus(); }
+        int snap_now = g_menu_req && menu_ok && !menu_open;      /* run one more game frame, keep it as the menu's backdrop */
+        if (snap_now) g_menu_req = 0;
         if (menu_open) {
             /* the menu owns the screen: the game is not ticked while it is open */
             MenuInput in = {g_buttons, g_stick[0], g_stick[1], g_touch, g_touch_x, g_touch_y, NULL};
@@ -216,6 +217,7 @@ static int run_session(void) {
         while (JS_ExecutePendingJob(rt, &pc) > 0) {}
         t_js += armGetSystemTick() - a;
 
+        if (snap_now) { menu_snapshot(); menu_open = 1; menu_reset_focus(); }
         u64 sw0 = armGetSystemTick();
         eglSwapBuffers(s_display, s_surface);
         t_swap += armGetSystemTick() - sw0;

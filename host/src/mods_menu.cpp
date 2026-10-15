@@ -20,7 +20,7 @@ struct Menu {
     bool ready = false;
     std::string title;
     std::unique_ptr<ModMenuUi> ui;
-    GLuint prog = 0, fontTex = 0, vbo = 0, ibo = 0;
+    GLuint prog = 0, fontTex = 0, snapTex = 0, vbo = 0, ibo = 0;
     GLint locProj = -1, locTex = -1, locPos = -1, locUv = -1, locCol = -1;
     uint64_t prev = 0;
     int prevTouch = 0;
@@ -174,18 +174,20 @@ extern "C" int menu_init(const char* ttfPath, const char* title) {
     io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-    ImFont* font = ttfPath ? io.Fonts->AddFontFromFileTTF(ttfPath, 30.0f) : nullptr;
+    ImFont* font = ttfPath ? io.Fonts->AddFontFromFileTTF(ttfPath, 22.0f) : nullptr;
     if (!font) {
         ImFontConfig cfg;
-        cfg.SizePixels = 30.0f;
+        cfg.SizePixels = 22.0f;
         io.Fonts->AddFontDefault(&cfg);
     }
     ImGui::StyleColorsDark();
-    ImGuiStyle& st = ImGui::GetStyle();
-    st.WindowRounding = 6.f;
-    st.FrameRounding = 4.f;
-    st.ItemSpacing = ImVec2(10, 10);
-    st.FramePadding = ImVec2(10, 6);
+    ImGuiStyle& st = ImGui::GetStyle();                      /* square corners, a translucent panel over the game, blue title */
+    st.WindowRounding = st.FrameRounding = st.TabRounding = st.GrabRounding = 0.f;
+    st.WindowBorderSize = 1.f;
+    st.FramePadding = ImVec2(6, 4);
+    st.ItemSpacing = ImVec2(8, 7);
+    st.Colors[ImGuiCol_WindowBg] = ImVec4(0.07f, 0.08f, 0.10f, 0.92f);
+    st.Colors[ImGuiCol_TitleBg] = st.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.16f, 0.29f, 0.48f, 1.f);
 
     unsigned char* px = nullptr;
     int w = 0, h = 0;
@@ -207,6 +209,22 @@ extern "C" int menu_init(const char* ttfPath, const char* title) {
     return 1;
 }
 
+extern "C" void menu_snapshot(void) {
+    if (!g.ready) return;
+    if (!g.snapTex) {
+        glGenTextures(1, &g.snapTex);
+        glBindTexture(GL_TEXTURE_2D, g.snapTex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, g.snapTex);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, (GLsizei)kW, (GLsizei)kH, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 extern "C" void menu_reset_focus(void) {
     g.first = true;
     if (g.ui) g.ui->resetFocus();
@@ -225,6 +243,11 @@ extern "C" int menu_frame(const MenuInput* in) {
     bool closeRequested = (down & HidNpadButton_B) || (down & HidNpadButton_Minus);
 
     ImGui::NewFrame();
+    if (g.snapTex) {                                         /* the game's last frame, dimmed, stays visible behind the panels */
+        ImDrawList* bg = ImGui::GetBackgroundDrawList();
+        bg->AddImage((ImTextureID)(intptr_t)g.snapTex, ImVec2(0, 0), ImVec2(kW, kH), ImVec2(0, 1), ImVec2(1, 0));
+        bg->AddRectFilled(ImVec2(0, 0), ImVec2(kW, kH), IM_COL32(0, 0, 0, 90));
+    }
     ModMenuUi::Header header{g.title, in->status ? in->status : ""};
     bool applied = g.ui->draw(header, ImVec2(kW, kH));
     ImGui::Render();
@@ -232,7 +255,7 @@ extern "C" int menu_frame(const MenuInput* in) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, (GLsizei)kW, (GLsizei)kH);
     glDisable(GL_SCISSOR_TEST);
-    glClearColor(0.06f, 0.06f, 0.08f, 1.0f);
+    glClearColor(0.f, 0.f, 0.f, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
     render(ImGui::GetDrawData());
 
