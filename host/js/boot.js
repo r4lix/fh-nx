@@ -244,23 +244,44 @@
   //    (a) it is far off screen (re-checked every 4th frame; the margin is wider than anything can travel in 4
   //    frames), or (b) its character's state, the camera and animation/balloon activity are all exactly as at
   //    the last full update. (b) is a dozen plain property reads against ~25 interpreted calls.
+  //    Stock MV runs the update every frame, and some of its effects only land on the update AFTER the one that saw
+  //    a change. Until those have landed the sprite is not skipped (its signature is left unset, __busy also
+  //    lifts the off-screen skip):
+  //     - a bitmap still loading (image loads are asynchronous): the update that set it computed a 0x0 frame from
+  //       it, and the first update after the load sets the real one. Skipping that update left every sprite whose
+  //       image was not decoded yet invisible until its character moved: the party on entering a map or after a
+  //       battle/menu, a follower who joins, an event page with a new graphic (the sitting hero in the chair scene).
+  //     - a balloon or animation that has just finished: the next update tells the character (endBalloon /
+  //       endAnimation), and an event waiting on it (Show Balloon Icon / Show Animation with wait) polls exactly
+  //       that; skipping it left the event waiting forever.
+  //     - a bush depth change: updateFrame uses the depth the sprite took at the end of the previous update.
+  //    A balloon/animation request on a far off-screen character is also started at once, as stock does.
   {
     const SC = g.Sprite_Character.prototype, update = SC.update;
     SC.update = function () {
-      if (this.__off && (Graphics.frameCount & 3) !== 0) return;
-      const c = this._character, gm = g.$gameMap;
+      const c = this._character;
+      if (this.__off && (Graphics.frameCount & 3) !== 0 && !this.__busy && (!c || (!c._animationId && !c._balloonId))) return;
+      const gm = g.$gameMap;
       if (c && !this._animationSprites.length && !this._balloonSprite && !c._animationId && !c._balloonId &&
           this.__dx === gm._displayX && this.__dy === gm._displayY && this.__rx === c._realX && this.__ry === c._realY &&
           this.__dir === c._direction && this.__pat === c._pattern && this.__op === c._opacity && this.__bt === c._blendType &&
           this.__cn === c._characterName && this.__ci === c._characterIndex && this.__tid === c._tileId &&
           this.__tr === c._transparent && this.__bd === c._bushDepth && this.__pt === c._priorityType &&
           this.__jc === c._jumpCount && this.__sid === gm._tilesetId) return;
+      const bd = this._bushDepth || 0;
       update.apply(this, arguments);
+      let busy = this._animationSprites.length > 0 || !!this._balloonSprite;
       if (c) {
-        this.__dx = gm._displayX; this.__dy = gm._displayY; this.__rx = c._realX; this.__ry = c._realY;
-        this.__dir = c._direction; this.__pat = c._pattern; this.__op = c._opacity; this.__bt = c._blendType;
-        this.__cn = c._characterName; this.__ci = c._characterIndex; this.__tid = c._tileId; this.__tr = c._transparent; this.__bd = c._bushDepth; this.__pt = c._priorityType; this.__jc = c._jumpCount; this.__sid = gm._tilesetId;
+        const b = this._bitmap;
+        if ((b && !b.isReady()) || bd !== this._bushDepth || (c._balloonPlaying && !this._balloonSprite) || (c._animationPlaying && !this._animationSprites.length)) {
+          this.__dx = NaN; busy = true;                                  // not settled: the next update runs in full
+        } else {
+          this.__dx = gm._displayX; this.__dy = gm._displayY; this.__rx = c._realX; this.__ry = c._realY;
+          this.__dir = c._direction; this.__pat = c._pattern; this.__op = c._opacity; this.__bt = c._blendType;
+          this.__cn = c._characterName; this.__ci = c._characterIndex; this.__tid = c._tileId; this.__tr = c._transparent; this.__bd = c._bushDepth; this.__pt = c._priorityType; this.__jc = c._jumpCount; this.__sid = gm._tilesetId;
+        }
       }
+      this.__busy = busy;
       this.__off = this.x < -128 || this.x > Graphics.width + 128 || this.y < -192 || this.y > Graphics.height + 128;
       this.renderable = !this.__off;                                   // far off screen: not drawn either
     };
