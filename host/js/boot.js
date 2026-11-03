@@ -204,7 +204,12 @@
       const proto = cls.prototype, setValue = proto.setValue, onChange = proto.onChange;
       proto.setValue = function (id) {
         this.__id = id; this.__before = kind === "va" ? this._data[id] : !!this._data[id];
-        try { return setValue.apply(this, arguments); } finally { this.__id = undefined; }
+        try { return setValue.apply(this, arguments); }
+        finally {
+          this.__id = undefined;
+          const cur = g.__curIt;                                                   // every id a tracked run writes, and what (see 7)
+          if (cur && cur.__ww) cur.__ww.push(this, id, kind === "va" ? (this._data[id] || 0) : !!this._data[id]);
+        }
       };
       proto.onChange = function () {
         const id = this.__id;
@@ -369,7 +374,8 @@
           let spec;
           if (this.__pure) {            // see 7: which commands leave the next identical run a no-op
             const p = command.parameters, t = p[0];
-            if (PURE[code] === 1 || (code === 111 && (t <= 2 || t === 4 || (t >= 7 && t <= 10))) || (code === 122 && p[3] <= 1) || code === 117) {
+            if (PURE[code] === 1 || (code === 111 && t <= 2) || (code === 122 && p[3] <= 1) || code === 117) {
+            } else if (code === 111 && (t === 4 || (t >= 7 && t <= 10))) { (this.__root || this).__actC = true;  // actor/party condition: see 7
             } else if (code === 230 && t <= 120) { (this.__root || this).__waited = true;
             } else if (code === 111 && t === 11 && g.__rec) {
               g.__rec.push(3, p[1], Input.isPressed(p[1]));                       // a button condition: remember its state
@@ -409,7 +415,7 @@
   //    brings the normal path back. Exactly equivalent for lists of conditional branches on switches/variables.
   //  Conditions on actors, gold and items (the bulk of F&H's common events) read party/actor state, so those
   //  mutators bump g.__stateVer too; skipped runs are also re-verified every 60 frames as a safety net for any
-  //  plugin path that changes such state without going through them.
+  //  plugin path that changes such state without going through them (see TTL renewal below for how).
   {
     const bump = (proto, names) => { for (const n of names) { const f = proto[n]; if (typeof f === "function") proto[n] = function () { g.__actVer++; return f.apply(this, arguments); }; } };
     bump(g.Game_BattlerBase.prototype, ["refresh", "clearStates", "addNewState", "eraseState"]);
@@ -460,18 +466,85 @@
       }
       return true;
     };
+    // TTL renewal. When a cached run's 60 updates run out it is re-run as the safety net above; the Outfit common
+    // events (~2000 commands each, plus ~1 ms of image requests in their setup) expire together: two 6-12 ms
+    // updates on the PC about once a second. A cached run is a deterministic function of
+    //  (a) the values it read and the final values of the ids it wrote (a re-run writes them again): the record;
+    //  (b) the actor/party state that its conditions on actors, gold, items, weapons and armors (111) read. That
+    //      is not recorded; at the end of every call (one update's worth of commands) that evaluated such a
+    //      condition, a fingerprint of that state is taken. Within a call only the run's own pure commands run, so
+    //      it is the state those conditions saw. If the calls of one run saw different states, it is not renewable.
+    // When (a) and (b) are unchanged at expiry, a re-run would take the same path and end cached with the same
+    // record, so the cache is renewed for another 60 updates instead (the re-run's setup and waits are skipped
+    // too: a list with waits is renewed at its expiry rather than re-cached at the end of its re-run). Anything
+    // else, or a scene change in progress (which defers a re-run), takes the normal re-run.
+    const fpEnd = {};
+    const fpArr = (b, a) => { if (!a) { b.push(-1); return; } b.push(a.length); for (let i = 0; i < a.length; i++) b.push(a[i]); };
+    const fpObj = (b, o) => { for (const k in o) b.push(k, o[k]); b.push(fpEnd); };
+    const fingerprint = (b) => {
+      const P = g.$gameParty, A = g.$gameActors._data;
+      b.length = 0;
+      b.push(P._gold, !!P._inBattle); fpArr(b, P._actors); fpArr(b, P._guestActors);
+      fpObj(b, P._items); fpObj(b, P._weapons); fpObj(b, P._armors);
+      for (let i = 0; i < A.length; i++) {
+        const a = A[i];
+        if (!a) { b.push(null); continue; }
+        b.push(a._name, a._classId, !!a._hidden); fpArr(b, a._skills); fpArr(b, a._states);
+        const e = a._equips; b.push(e.length);
+        for (let j = 0; j < e.length; j++) { const x = e[j]; if (x) b.push(x._dataClass, x._itemId); else b.push(null); }
+      }
+      return b;
+    };
+    const fpEq = (a, b) => {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    };
+    const fpBuf = [];
+    const fpNow = () => {                                             // the current fingerprint, in a reused buffer
+      const d = g.__pdbg, a = d ? nx.now() : 0;
+      fingerprint(fpBuf);
+      if (d) { d.fpN++; d.fpT += nx.now() - a; }
+      return fpBuf;
+    };
+    const renew = (it) => {
+      const d = g.__pdbg;
+      if (d) d.expire++;
+      if (!it.__rok) return false;
+      if (g.SceneManager.isSceneChanging()) { if (d) d.rScene++; return false; }
+      if (!same(it.__idleRec)) { if (d) d.rRec++; return false; }
+      if (it.__fp && !fpEq(fpNow(), it.__fp)) { if (d) d.rFp++; return false; }
+      it.__idleU = g.__upd;
+      const ow = it.__owner;
+      if (ow) { ow.__sleep = it.__ev; ow.__sleepUntil = g.__upd + 60; ow.__sleepAct = g.__actVer; ow.__sleepImg = it.__img5; }
+      if (d) d.renew++;
+      return true;
+    };
+    // true: this run would be the cached no-op, skip it
+    const idle = (it, list) => {
+      if (it._list || !list || it.__idleList !== list || it.__idleAct !== g.__actVer) return false;
+      if (it.__ev && (it.__dirty || (it.__img5 && it.__img5 !== g.__imgVer))) return false;
+      if (g.__upd - it.__idleU < 60) return it.__ev || same(it.__idleRec);
+      return renew(it);
+    };
     const tracked = (it, list, setupFn) => {
       if (!it._list) {
         if (!list) return setupFn();                                  // nothing to run: stock behaviour
-        if (it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? (!it.__dirty && (!it.__img5 || it.__img5 === g.__imgVer)) : same(it.__idleRec))) { if (g.__pdbg) g.__pdbg.skip++; return; }
         if (g.__pdbg) { g.__pdbg.fresh++; if (it.__idleList === list) g.__pdbg[it.__ev ? "freshDirty" : "freshSame"]++; }
         g.__rec = it.__r0 = [];
+        it.__ww = [];
         g.__curIt = it;
         setupFn();
         it.__pure = true; it.__wl = []; it.__waited = false; it.__a0 = g.__actVer; it.__l0 = list; it.__root = null;
+        it.__fp0 = null; it.__fpBad = false;
       } else { if (g.__pdbg) g.__pdbg.cont++; if (it.__pure) { g.__rec = it.__r0; g.__curIt = it; } }
+      it.__actC = false;
       it.update();
       g.__rec = null; g.__curIt = null;
+      if (it.__actC && it.__pure && it.__l0) {                        // this call evaluated actor/party conditions
+        if (!it.__fp0) it.__fp0 = fpNow().slice();
+        else if (!it.__fpBad && !fpEq(fpNow(), it.__fp0)) it.__fpBad = true;
+      }
       if (it.__l0 && !it.isRunning()) {
         if (it.__pure && g.__actVer === it.__a0 && (it.__wl.length === 0 || (!it.__waited && netNoop(it.__wl)))) {
           it.__idleList = it.__l0; it.__idleAct = it.__a0; it.__idleU = g.__upd; it.__idleRec = it.__r0;
@@ -480,9 +553,28 @@
           for (let i = 0; i < r.length; i += 3) if (r[i] > 1 && r[i] !== 5) { ev = false; break; }   // image reads are covered by __actVer (setImage hooks)
           let h5 = false; for (let i = 0; i < r.length; i += 3) if (r[i] === 5) { h5 = true; break; }
           it.__ev = ev; it.__dirty = false; it.__img5 = h5 ? g.__imgVer : 0;
+          // Every id the run wrote joins the record with the value it last wrote there: stock writes it again on
+          // its next pass, so when anyone else changes it the owner has to run (switches/variables are watched like
+          // reads; the record is re-read every update when the run is not watched, and at expiry in any case). If
+          // another writer already changed it while this run was waiting, the owner runs on the next update.
+          const w = it.__ww;
+          let stale = false;
+          if (w.length) {
+            const seen = [new Set(), new Set(), new Set()];
+            for (let i = w.length - 3; i >= 0; i -= 3) {                 // last write first
+              const st = w[i], id = w[i + 1], v = w[i + 2], k = st instanceof g.Game_Variables ? 1 : st instanceof g.Game_Switches ? 0 : 2, key = k === 2 ? String(id) : id;
+              if (seen[k].has(key)) continue;
+              seen[k].add(key);
+              r.push(k, id, v);
+              if ((k === 1 ? (st._data[id] || 0) : !!st._data[id]) !== v) stale = true;
+            }
+          }
+          it.__ww = null;
+          it.__rok = !it.__fpBad; it.__fp = it.__fp0;                   // renewable at expiry (see TTL renewal above)
           const ow = it.__owner;
           if (ow) { ow.__sleep = ev; ow.__sleepUntil = g.__upd + 60; ow.__sleepAct = g.__actVer; ow.__sleepImg = it.__img5; }   // owner is skipped outright until woken
-          if (ev) for (let i = 0; i < r.length; i += 3) { if (r[i] === 5) continue; const m = g.__watch[r[i]]; let st = m.get(r[i + 1]); if (!st) m.set(r[i + 1], st = new Set()); st.add(it); }
+          if (stale) { it.__dirty = true; if (ow) ow.__sleep = false; }
+          if (ev) for (let i = 0; i < r.length; i += 3) { if (r[i] > 1) continue; const m = g.__watch[r[i]]; let st = m.get(r[i + 1]); if (!st) m.set(r[i + 1], st = new Set()); st.add(it); }
         } else { it.__idleList = null; if (g.__pdbg) { const k = it.__pure ? (it.__waited ? "endPureWaitWrite" : "endPureWrite") : "endImpure"; g.__pdbg[k] = (g.__pdbg[k] || 0) + 1; } }
         it.__l0 = null;
       }
@@ -493,7 +585,7 @@
       if (!it) return;
       const list = this.list();
       it.__owner = this;
-      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? (!it.__dirty && (!it.__img5 || it.__img5 === g.__imgVer)) : same(it.__idleRec))) return;
+      if (idle(it, list)) return;
       tracked(it, list, () => it.setup(list, this._eventId));
     };
     const GC = g.Game_CommonEvent.prototype, cupd = GC.update;
@@ -502,7 +594,7 @@
       if (!it) return;
       const list = this.list();
       it.__owner = this;
-      if (!it._list && it.__idleList === list && it.__idleAct === g.__actVer && g.__upd - it.__idleU < 60 && (it.__ev ? (!it.__dirty && (!it.__img5 || it.__img5 === g.__imgVer)) : same(it.__idleRec))) return;
+      if (idle(it, list)) return;
       tracked(it, list, () => it.setup(list));
     };
   }
