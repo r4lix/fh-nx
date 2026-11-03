@@ -228,16 +228,74 @@
     }
   }
 
-  // 2. Game_Map.isAnyEventStarting scans every event, and is asked ~10 times per update. The answer is cached
-  //    for the duration of one update and invalidated whenever an event starts or clears its flag.
+  // 2. "Is any event starting?" is a scan of every event's _starting: Game_Map.isAnyEventStarting (~10 times per
+  //    update), YEP_StopMapMovement's isAnyEventStartingQuick (once per self-moving event per update) and
+  //    setupStartingMapEvent; up to 4000 isStarting calls per update on a big map. Only Game_Event.start sets
+  //    the flag (initMembers and clearStartingFlag clear it), so the events that started are kept in a set,
+  //    rebuilt from the events whenever $gameMap._events is another array (new map, loaded save). The answer is
+  //    whether one of them is still starting and on this map; entries that are not are dropped.
+  //    setupStartingMapEvent keeps its stock scan (same order) and only returns false at once when none is.
   {
-    const GM = g.Game_Map.prototype, any = GM.isAnyEventStarting, update = GM.update;
-    GM.isAnyEventStarting = function () { return this.__starting !== undefined ? this.__starting : (this.__starting = any.apply(this, arguments)); };
+    const GM = g.Game_Map.prototype, update = GM.update;
     g.__upd = 0;
-    GM.update = function () { this.__starting = undefined; g.__upd++; return update.apply(this, arguments); };
     const GE = g.Game_Event.prototype, start = GE.start, clear = GE.clearStartingFlag;
-    GE.start = function () { const r = start.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
-    GE.clearStartingFlag = function () { const r = clear.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
+    const stockAny = GM.isAnyEventStarting, quick = GM.isAnyEventStartingQuick, ssme = GM.setupStartingMapEvent, isStarting = String(GE.isStarting);
+    if (isStarting.indexOf("return this._starting") >= 0 && isStarting.length < 80 && String(stockAny).indexOf("isStarting") >= 0 && String(stockAny).length < 160) {
+      const set = new Set();
+      let src = null;
+      const any = (gm) => {
+        const ev = gm._events;
+        if (ev !== src) {
+          src = ev; set.clear();
+          for (let i = 0; i < ev.length; i++) { const e = ev[i]; if (e && e._starting) set.add(e); }
+        }
+        if (set.size === 0) return false;
+        for (const e of set) {
+          if (e._starting && (ev[e._eventId] === e || ev.indexOf(e) >= 0)) return true;
+          set.delete(e);
+        }
+        return false;
+      };
+      GE.start = function () { const r = start.call(this); if (this._starting) set.add(this); return r; };
+      GE.clearStartingFlag = function () { set.delete(this); return clear.call(this); };
+      GM.isAnyEventStarting = function () { return any(this); };
+      if (quick) {
+        if (String(quick).indexOf("isStarting") >= 0 && String(quick).length < 250) GM.isAnyEventStartingQuick = function () { return any(this); };
+        else nx.log("port patch: isAnyEventStartingQuick keeps its scan (source differs)");
+      }
+      if (String(ssme).indexOf("isStarting") >= 0 && String(ssme).length < 400) GM.setupStartingMapEvent = function () { return any(this) ? ssme.call(this) : false; };
+      else nx.log("port patch: setupStartingMapEvent keeps its scan (source differs)");
+      GM.update = function (sceneActive) { g.__upd++; return update.call(this, sceneActive); };
+    } else {
+      // fallback: the answer is cached for one update, invalidated whenever an event starts or clears its flag
+      nx.log("port patch: starting-event set not installed (source differs)");
+      GM.isAnyEventStarting = function () { return this.__starting !== undefined ? this.__starting : (this.__starting = stockAny.apply(this, arguments)); };
+      GM.update = function () { this.__starting = undefined; g.__upd++; return update.apply(this, arguments); };
+      GE.start = function () { const r = start.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
+      GE.clearStartingFlag = function () { const r = clear.apply(this, arguments); if (g.$gameMap) g.$gameMap.__starting = undefined; return r; };
+    }
+  }
+
+  // 2b. setupAutorunCommonEvent walks all ~316 common events on every update to find the 2 autorun ones (trigger 1).
+  //     The autorun ones are listed once per $dataCommonEvents; the loop is the stock one over that list (same
+  //     order, same switch reads, same result).
+  {
+    const GM = g.Game_Map.prototype, auto = GM.setupAutorunCommonEvent, src = String(auto);
+    if (src.indexOf("event.trigger === 1 && $gameSwitches.value(event.switchId)") >= 0 && src.indexOf("$dataCommonEvents.length") >= 0 && src.length < 360) {
+      let data = null, n = -1, list = [];
+      GM.setupAutorunCommonEvent = function () {
+        const d = g.$dataCommonEvents;
+        if (d !== data || d.length !== n) {
+          data = d; n = d.length; list = [];
+          for (let i = 0; i < n; i++) if (d[i] && d[i].trigger === 1) list.push(d[i]);
+        }
+        for (let i = 0; i < list.length; i++) {
+          const event = list[i];
+          if (event.trigger === 1 && g.$gameSwitches.value(event.switchId)) { this._interpreter.setup(event.list); return true; }
+        }
+        return false;
+      };
+    } else nx.log("port patch: setupAutorunCommonEvent keeps its scan (source differs)");
   }
 
   // 3. Sprite_Character.update only has an effect when something it mirrors has changed. A sprite is skipped when
