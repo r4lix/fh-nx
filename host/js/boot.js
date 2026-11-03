@@ -261,20 +261,95 @@
   //       that; skipping it left the event waiting forever.
   //     - a bush depth change: updateFrame uses the depth the sprite took at the end of the previous update.
   //    A balloon/animation request on a far off-screen character is also started at once, as stock does.
+  //    (c) Walking moves the camera, which changes (b)'s signature for every sprite. When only the camera and the
+  //    character's real position differ from the signature, and nothing is pending (settled, no animation/balloon,
+  //    no children but the bush half-body sprites), the full update recomputes the same bitmap, frame, opacity,
+  //    blend mode and visibility, and changes only x/y/z: those are recomputed inline with the stock arithmetic of
+  //    Sprite_Character.updatePosition -> Game_CharacterBase.screenX/Y/Z -> Game_Map.adjustX/Y, written through
+  //    the position ObservablePoint as the x/y setters do. Used only where that chain is the stock one (checked
+  //    by source at boot, and per character: Game_Vehicle has its own screenY), else updatePosition() is called.
+  //    A parked sprite that stays far off screen keeps its old signature, as the 4th-frame check did before.
   {
     const SC = g.Sprite_Character.prototype, update = SC.update;
+    const GCB = g.Game_CharacterBase.prototype, GM = g.Game_Map.prototype, DO = g.PIXI.DisplayObject.prototype, OP = g.PIXI.ObservablePoint;
+    const hop = Object.prototype.hasOwnProperty, flat = (f) => (typeof f === "function" ? String(f) : "").replace(/\s+/g, "");
+    const setterHas = (o, k, s) => { const d = Object.getOwnPropertyDescriptor(o, k); return !!d && flat(d.set).indexOf(s) >= 0; };
+    const sPos = SC.updatePosition, sX = GCB.screenX, sY = GCB.screenY, sZ = GCB.screenZ, scX = GCB.scrolledX, scY = GCB.scrolledY,
+      shY = GCB.shiftY, jH = GCB.jumpHeight, iOC = GCB.isObjectCharacter, aX = GM.adjustX, aY = GM.adjustY, tW = GM.tileWidth, tH = GM.tileHeight;
+    const camOK =   // the stock sources (rpg_sprites.js / rpg_objects.js 1.6.x, pixi.js 4.5.4), whitespace removed
+      flat(update) === "function(){Sprite_Base.prototype.update.call(this);this.updateBitmap();this.updateFrame();this.updatePosition();this.updateAnimation();this.updateBalloon();this.updateOther();}" &&
+      flat(sPos) === "function(){this.x=this._character.screenX();this.y=this._character.screenY();this.z=this._character.screenZ();}" &&
+      flat(sX) === "function(){vartw=$gameMap.tileWidth();returnMath.round(this.scrolledX()*tw+tw/2);}" &&
+      flat(sY) === "function(){varth=$gameMap.tileHeight();returnMath.round(this.scrolledY()*th+th-this.shiftY()-this.jumpHeight());}" &&
+      flat(sZ) === "function(){returnthis._priorityType*2+1;}" &&
+      flat(scX) === "function(){return$gameMap.adjustX(this._realX);}" && flat(scY) === "function(){return$gameMap.adjustY(this._realY);}" &&
+      flat(shY) === "function(){returnthis.isObjectCharacter()?0:6;}" && flat(iOC) === "function(){returnthis._isObjectCharacter;}" &&
+      flat(jH) === "function(){return(this._jumpPeak*this._jumpPeak-Math.pow(Math.abs(this._jumpCount-this._jumpPeak),2))/2;}" &&
+      flat(aX) === "function(x){if(this.isLoopHorizontal()&&x<this._displayX-(this.width()-this.screenTileX())/2){returnx-this._displayX+$dataMap.width;}else{returnx-this._displayX;}}" &&
+      flat(aY) === "function(y){if(this.isLoopVertical()&&y<this._displayY-(this.height()-this.screenTileY())/2){returny-this._displayY+$dataMap.height;}else{returny-this._displayY;}}" &&
+      flat(tW) === "function(){return48;}" && flat(tH) === "function(){return48;}" &&
+      setterHas(DO, "x", "{this.transform.position.x=value;}") && setterHas(DO, "y", "{this.transform.position.y=value;}") &&
+      setterHas(OP.prototype, "x", "{if(this._x!==value){this._x=value;this.cb.call(this.scope);}}") &&
+      setterHas(OP.prototype, "y", "{if(this._y!==value){this._y=value;this.cb.call(this.scope);}}");
+    if (!camOK) nx.log("patch 3: the Sprite_Character position chain is not stock, camera-only updates off");
+    const charOK = (c) => c.screenX === sX && c.screenY === sY && c.screenZ === sZ && c.scrolledX === scX && c.scrolledY === scY &&
+      c.shiftY === shY && c.jumpHeight === jH && c.isObjectCharacter === iOC;
+    const spriteOK = (s) => {   // x/y/position reach the ObservablePoint through DisplayObject's own accessors
+      for (let p = s; p && p !== DO; p = Object.getPrototypeOf(p)) if (hop.call(p, "x") || hop.call(p, "y") || hop.call(p, "position")) return false;
+      return s.updatePosition === sPos && !!s.transform && s.transform.position instanceof OP;
+    };
+    const P3 = g.__p3 = { camOK: camOK, hook: null };   // hook: tests/sprite_camera_verify.js, called after every (c) update
+    // the Game_Map.adjustX/Y terms that change only with the camera, the map or the screen size
+    let kFc = -1, kDx = NaN, kDy = NaN, kMap = null, kGm = null, kOK = false, lh = false, lv = false, thX = 0, thY = 0, dW = 0, dH = 0, gw = 0, gh = 0;
     SC.update = function () {
       const c = this._character;
-      if (this.__off && (Graphics.frameCount & 3) !== 0 && !this.__busy && (!c || (!c._animationId && !c._balloonId))) return;
+      if (this.__off && (Graphics.frameCount & 3) !== 0 && !this.__busy && (!c || (!c._animationId && !c._balloonId))) return;   // (a)
       const gm = g.$gameMap;
       if (c && !this._animationSprites.length && !this._balloonSprite && !c._animationId && !c._balloonId &&
-          this.__dx === gm._displayX && this.__dy === gm._displayY && this.__rx === c._realX && this.__ry === c._realY &&
           this.__dir === c._direction && this.__pat === c._pattern && this.__op === c._opacity && this.__bt === c._blendType &&
           this.__cn === c._characterName && this.__ci === c._characterIndex && this.__tid === c._tileId &&
           this.__tr === c._transparent && this.__bd === c._bushDepth && this.__pt === c._priorityType &&
-          this.__jc === c._jumpCount && this.__sid === gm._tilesetId) return;
+          this.__jc === c._jumpCount && this.__sid === gm._tilesetId) {
+        const dx = gm._displayX, dy = gm._displayY, rx = c._realX, ry = c._realY;
+        if (this.__dx === dx && this.__dy === dy && this.__rx === rx && this.__ry === ry) return;                            // (b)
+        const k = this.children;
+        if (camOK && this.__dx === this.__dx && this.__dx !== undefined && !this.__busy && !c._animationPlaying && !c._balloonPlaying &&   // (c)
+            (k.length === 0 || (k.length <= 2 && (k[0] === this._upperBody || k[0] === this._lowerBody) &&
+                                (k.length === 1 || k[1] === this._upperBody || k[1] === this._lowerBody)))) {
+          if (kFc !== Graphics.frameCount || kDx !== dx || kDy !== dy || kMap !== g.$dataMap || kGm !== gm) {
+            kFc = Graphics.frameCount; kDx = dx; kDy = dy; kMap = g.$dataMap; kGm = gm;
+            kOK = gm.adjustX === aX && gm.adjustY === aY && gm.tileWidth === tW && gm.tileHeight === tH;
+            if (kOK) {
+              lh = gm.isLoopHorizontal(); lv = gm.isLoopVertical();
+              thX = dx - (gm.width() - gm.screenTileX()) / 2; thY = dy - (gm.height() - gm.screenTileY()) / 2;
+              dW = kMap.width; dH = kMap.height;
+            }
+            gw = Graphics.width; gh = Graphics.height;
+          }
+          let x, y;
+          if (kOK && (this.__pokc === c ? this.__pok : (this.__pokc = c, this.__pok = charOK(c))) &&
+              (this.__sok !== undefined ? this.__sok : (this.__sok = spriteOK(this)))) {
+            const ax = lh && rx < thX ? rx - dx + dW : rx - dx, ay = lv && ry < thY ? ry - dy + dH : ry - dy;
+            x = Math.round(ax * 48 + 48 / 2);
+            y = Math.round(ay * 48 + 48 - (c._isObjectCharacter ? 0 : 6) - (c._jumpPeak * c._jumpPeak - Math.pow(Math.abs(c._jumpCount - c._jumpPeak), 2)) / 2);
+            const p = this.transform.position;
+            if (p._x !== x) { p._x = x; p.cb.call(p.scope); }
+            if (p._y !== y) { p._y = y; p.cb.call(p.scope); }
+            this.z = c._priorityType * 2 + 1;
+          } else {
+            this.updatePosition(); x = this.x; y = this.y;
+          }
+          const off = x < -128 || x > gw + 128 || y < -192 || y > gh + 128;
+          if (!(off && this.__off)) {
+            this.__dx = dx; this.__dy = dy; this.__rx = rx; this.__ry = ry;
+            this.__off = off; this.renderable = !off;
+          }
+          if (P3.hook !== null) P3.hook(this);
+          return;
+        }
+      }
       const bd = this._bushDepth || 0;
-      update.apply(this, arguments);
+      update.call(this);
       let busy = this._animationSprites.length > 0 || !!this._balloonSprite;
       if (c) {
         const b = this._bitmap;
