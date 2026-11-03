@@ -756,6 +756,147 @@
     }
   }
 
+  // 16. Tilemap paint cache. Every time the camera crosses a tile boundary (every 16 logic updates per axis while
+  //     walking) ShaderTilemap._paintAllTiles clears both tile layers and recomputes every visible cell: 6
+  //     _readMapData calls, flag tests, _drawTile/_drawAutotile/_drawShadow/_drawTableEdge and 9 push() per rect,
+  //     2-3.2 ms on a PC (5.4 worst), a 6-20 ms hitch on the Switch. A cell's rects depend only on its 6 map values
+  //     (layers 0-3, the shadow bits, layer 1 of the tile above), on flag bits 0x10/0x80 of those 5 tiles and on
+  //     the tile size, and they are emitted at the cell's screen offset. So the stock _paintTiles records a map
+  //     cell's rects (relative to the cell) the first time, and they are replayed at the new offset while the
+  //     cell's key is unchanged: both layers' pointsBuf and hasAnim come out element for element as stock, in the
+  //     same order (0.75-0.97 ms per paint on a PC, 1.8 worst). The store is flat typed arrays (20 bytes per map
+  //     cell, 18 per cached rect, a handful of JS objects; 0.2-0.6 MB on the big maps), one for the tilemap that
+  //     painted last, rebuilt when another tilemap paints or the map data, flags array, map size or tile size
+  //     change. The first paint of a map records every cell (1.5-2x the stock paint); later ones only record the
+  //     cells that came into view or changed. Cells off a non-looping map draw nothing in stock and are skipped;
+  //     the row just below one (it can draw the table edge of the tile above) and values that do not fit the
+  //     store go through the stock _paintTiles every time. Only installed when everything the painting reaches
+  //     has this game's stock source. Check: tests/paint_verify.js.
+  {
+    const T = g.Tilemap, ST = g.ShaderTilemap && g.ShaderTilemap.prototype, PT = g.PIXI.tilemap;
+    const RL = PT && PT.RectTileLayer && PT.RectTileLayer.prototype;
+    const NAMES = ["_paintTiles", "_readMapData", "_isHigherTile", "_isTableTile", "_isOverpassPosition", "_drawTile", "_drawNormalTile", "_drawAutotile", "_drawTableEdge", "_drawShadow"];
+    const STATICS = ["isVisibleTile", "isAutotile", "isTileA1", "isTileA2", "isTileA3", "isTileA4", "isTileA5", "getAutotileKind", "getAutotileShape", "isShadowingTile"];
+    let h = 0x811c9dc5;
+    if (ST && RL) {
+      let src = [ST._paintAllTiles, RL.addRect, Number.prototype.mod].concat(NAMES.map((n) => ST[n]), STATICS.map((n) => T[n])).map(String).join("\n") +
+        JSON.stringify([T.FLOOR_AUTOTILE_TABLE, T.WALL_AUTOTILE_TABLE, T.WATERFALL_AUTOTILE_TABLE, T.TILE_ID_B, T.TILE_ID_C, T.TILE_ID_D, T.TILE_ID_E,
+          T.TILE_ID_A5, T.TILE_ID_A1, T.TILE_ID_A2, T.TILE_ID_A3, T.TILE_ID_A4, T.TILE_ID_MAX]);
+      src = src.replace(/\s+/g, "");                                    // FNV-1a over the code without whitespace
+      for (let i = 0; i < src.length; i++) h = Math.imul(h ^ src.charCodeAt(i), 0x01000193);
+    }
+    if ((h >>> 0) !== 0x6521c030) nx.log("port patch: tilemap paint cache off (tile painting code is not stock, " + (h >>> 0).toString(16) + ")");
+    else {
+      const stockPaint = ST._paintAllTiles, refs = NAMES.map((n) => ST[n]), POOL_MAX = 1 << 21;
+      const stats = { paints: 0, hit: 0, miss: 0, edge: 0, stock: 0, resets: 0 };   // edge: cells painted by the stock _paintTiles
+      // one cache for the tilemap that painted last (tilemaps get an id, the cache holds no tilemap): a tilemap
+      // the game keeps alive after its scene (map 80's is) does not keep a cache alive with it
+      let cache = null, owners = 0;
+      g.__paintCache = { stock: stockPaint, stats, cache: () => cache };
+      // copy the rects src[from..to) into the pool from index q, cell-relative; false if a value does not fit an
+      // Int16Array exactly (not an integer, out of range, or -0)
+      const store = (P, q, src, from, to, dx, dy) => {
+        for (let j = from; j < to; j += 9, q += 9) {
+          const a0 = src[j], a1 = src[j + 1], a2 = src[j + 2] - dx, a3 = src[j + 3] - dy, a4 = src[j + 4], a5 = src[j + 5], a6 = src[j + 6], a7 = src[j + 7], a8 = src[j + 8];
+          if (((a0 << 16) >> 16) !== a0 || ((a1 << 16) >> 16) !== a1 || ((a2 << 16) >> 16) !== a2 || ((a3 << 16) >> 16) !== a3 || ((a4 << 16) >> 16) !== a4 ||
+              ((a5 << 16) >> 16) !== a5 || ((a6 << 16) >> 16) !== a6 || ((a7 << 16) >> 16) !== a7 || ((a8 << 16) >> 16) !== a8) return false;
+          if ((a0 === 0 && 1 / a0 < 0) || (a1 === 0 && 1 / a1 < 0) || (a2 === 0 && 1 / a2 < 0) || (a3 === 0 && 1 / a3 < 0) || (a4 === 0 && 1 / a4 < 0) ||
+              (a5 === 0 && 1 / a5 < 0) || (a6 === 0 && 1 / a6 < 0) || (a7 === 0 && 1 / a7 < 0) || (a8 === 0 && 1 / a8 < 0)) return false;
+          P[q] = a0; P[q + 1] = a1; P[q + 2] = a2; P[q + 3] = a3; P[q + 4] = a4; P[q + 5] = a5; P[q + 6] = a6; P[q + 7] = a7; P[q + 8] = a8;
+        }
+        return true;
+      };
+      ST._paintAllTiles = function (startX, startY) {
+        const tw = this._tileWidth, th = this._tileHeight, data = this._mapData, W = this._mapWidth, H = this._mapHeight, flags = this.flags;
+        const lowerRL = this.lowerLayer && this.lowerLayer.children[0], upperRL = this.upperLayer && this.upperLayer.children[0];
+        let same = !!(data && lowerRL && upperRL && W > 0 && H > 0 && (W | 0) === W && (H | 0) === H && W * H <= 262144 &&
+          (startX | 0) === startX && (startY | 0) === startY && (tw | 0) === tw && (th | 0) === th && tw > 0 && th > 0);
+        for (let i = 0; same && i < NAMES.length; i++) same = this[NAMES[i]] === refs[i];
+        if (!same) { stats.stock++; return stockPaint.call(this, startX, startY); }
+        const id = this.__pcid || (this.__pcid = ++owners);
+        let c = cache;
+        if (c === null || c.id !== id || c.data !== data || c.W !== W || c.H !== H || c.flags !== flags || c.tw !== tw || c.th !== th) {
+          c = cache = { id, data, W, H, flags, tw, th, key: new Int16Array(W * H * 8), off: new Int32Array(W * H), pool: new Int16Array(9 * 2048), top: 0 };
+        }
+        this.lowerZLayer.clear();
+        this.upperZLayer.clear();
+        const tileCols = Math.ceil(this._width / tw) + 1, tileRows = Math.ceil(this._height / th) + 1;
+        const WH = W * H, hw = !!this.horizontalWrap, vw = !!this.verticalWrap, K = c.key, OFF = c.off;
+        const lpb = lowerRL.pointsBuf, upb = upperRL.pointsBuf;
+        let P = c.pool, la = false, ua = false, hit = 0, miss = 0, edge = 0;
+        for (let y = 0; y < tileRows; y++) {
+          const my = startY + y, dy = y * th;
+          // _readMapData: Number.prototype.mod's formula on a looping axis, 0 outside the map
+          const myw = vw ? ((my % H) + H) % H : my, myu = vw ? (((my - 1) % H) + H) % H : my - 1;
+          const inRow = myw >= 0 && myw < H, upRow = myu >= 0 && myu < H;
+          if (!inRow && !upRow) continue;                              // all 6 reads are 0: stock draws nothing
+          const rowBase = myw * W, upBase = WH + myu * W;
+          for (let x = 0; x < tileCols; x++) {
+            const mx = startX + x, mxw = hw ? ((mx % W) + W) % W : mx;
+            if (mxw < 0 || mxw >= W) continue;                         // all 6 reads are 0 again
+            if (!inRow) { edge++; this._paintTiles(startX, startY, x, y); continue; }     // the row just below the map
+            const i0 = rowBase + mxw;
+            const t0 = data[i0] || 0, t1 = data[WH + i0] || 0, t2 = data[2 * WH + i0] || 0, t3 = data[3 * WH + i0] || 0,
+              sb = data[4 * WH + i0] || 0, u1 = upRow ? data[upBase + mxw] || 0 : 0;
+            const fb = (flags[t0] & 0x90) | ((flags[t1] & 0x90) >> 2) | ((flags[t2] & 0x90) >> 4) | ((flags[t3] & 0x90) << 4) | ((flags[u1] & 0x90) << 6);
+            const b = i0 << 3, m = K[b + 7];
+            if (m !== 0 && K[b] === t0 && K[b + 1] === t1 && K[b + 2] === t2 && K[b + 3] === t3 && K[b + 4] === sb && K[b + 5] === u1 && K[b + 6] === fb) {
+              hit++;
+              const dx = x * tw;
+              let q = OFF[i0] * 9, n = (m >> 3) & 63, k = lpb.length;
+              for (; n > 0; n--, q += 9) {
+                lpb[k] = P[q]; lpb[k + 1] = P[q + 1]; lpb[k + 2] = P[q + 2] + dx; lpb[k + 3] = P[q + 3] + dy; lpb[k + 4] = P[q + 4];
+                lpb[k + 5] = P[q + 5]; lpb[k + 6] = P[q + 6]; lpb[k + 7] = P[q + 7]; lpb[k + 8] = P[q + 8]; k += 9;
+              }
+              n = (m >> 9) & 63; k = upb.length;
+              for (; n > 0; n--, q += 9) {
+                upb[k] = P[q]; upb[k + 1] = P[q + 1]; upb[k + 2] = P[q + 2] + dx; upb[k + 3] = P[q + 3] + dy; upb[k + 4] = P[q + 4];
+                upb[k + 5] = P[q + 5]; upb[k + 6] = P[q + 6]; upb[k + 7] = P[q + 7]; upb[k + 8] = P[q + 8]; k += 9;
+              }
+              if (m & 2) la = true;
+              if (m & 4) ua = true;
+              continue;
+            }
+            // not cached (or the cell changed): the stock cell paint, recorded
+            miss++;
+            const l0 = lpb.length, u0 = upb.length, la0 = lowerRL.hasAnim, ua0 = upperRL.hasAnim;
+            lowerRL.hasAnim = false; upperRL.hasAnim = false;
+            this._paintTiles(startX, startY, x, y);
+            const cla = lowerRL.hasAnim, cua = upperRL.hasAnim;
+            lowerRL.hasAnim = la0 || cla; upperRL.hasAnim = ua0 || cua;
+            const rl = (lpb.length - l0) / 9, ru = (upb.length - u0) / 9;
+            K[b + 7] = 0;
+            if (rl > 63 || ru > 63 || ((t0 << 16) >> 16) !== t0 || ((t1 << 16) >> 16) !== t1 || ((t2 << 16) >> 16) !== t2 || ((t3 << 16) >> 16) !== t3 ||
+                ((sb << 16) >> 16) !== sb || ((u1 << 16) >> 16) !== u1) continue;          // keys must fit the Int16Array too (never -0: '|| 0')
+            let p = c.top;
+            const reuse = m !== 0 && ((m >> 3) & 63) + ((m >> 9) & 63) >= rl + ru;
+            if (reuse) p = OFF[i0];                                        // the cell's old slot is big enough
+            else {
+              if ((p + rl + ru) * 9 > P.length) {
+                let n = P.length * 2;
+                while (n < (p + rl + ru) * 9) n *= 2;
+                if (n > POOL_MAX) { K.fill(0); c.top = p = 0; n = P.length; stats.resets++; }   // runaway tile edits: start over
+                if (n > P.length) { const np = new Int16Array(n); np.set(P); P = c.pool = np; }
+              }
+              c.top = p + rl + ru;
+            }
+            const dx = x * tw;
+            if (!store(P, p * 9, lpb, l0, lpb.length, dx, dy) || !store(P, (p + rl) * 9, upb, u0, upb.length, dx, dy)) {
+              if (!reuse) c.top = p;                                       // not storable: give the space back
+              continue;
+            }
+            OFF[i0] = p;
+            K[b] = t0; K[b + 1] = t1; K[b + 2] = t2; K[b + 3] = t3; K[b + 4] = sb; K[b + 5] = u1; K[b + 6] = fb;
+            K[b + 7] = 1 | (cla ? 2 : 0) | (cua ? 4 : 0) | (rl << 3) | (ru << 9);
+          }
+        }
+        if (la) lowerRL.hasAnim = true;
+        if (ua) upperRL.hasAnim = true;
+        stats.paints++; stats.hit += hit; stats.miss += miss; stats.edge += edge;
+      };
+    }
+  }
+
   // 9. A resting event (not moving/jumping/animating, no self movement, not locked, no auto trigger, not chasing,
   //    fleeing or alerted) does in Game_Event.update only: _stopCount++, the alert lock countdown, and its parallel
   //    interpreter. Everything else in the chain (updateStop, updateSelfMovement and Yanfly's chase hooks,
