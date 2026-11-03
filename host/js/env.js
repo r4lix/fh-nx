@@ -343,7 +343,8 @@
 
   g.addEventListener = g.removeEventListener = () => {};
   g.getComputedStyle = () => ({});
-  g.close = g.open = () => {};
+  g.open = () => {};
+  g.close = () => { if (nx.quit) nx.quit(); };                  // MV's SceneManager.exit ends in window.close()
   g.screen = { width: nx.width, height: nx.height };
   g.innerWidth = nx.width;
   g.innerHeight = nx.height;

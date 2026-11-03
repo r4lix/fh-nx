@@ -106,6 +106,13 @@ static JSValue nx_open_menu(JSContext *ctx, JSValueConst self, int argc, JSValue
     return JS_UNDEFINED;
 }
 
+/* nx.quit(): end the app the normal way (MV's SceneManager.exit -> window.close, and scripted test runs): the loops see g_quit,
+ * the session ends and main returns, so a launcher (hbmenu, SwitchLink) gets the console back. */
+static JSValue nx_quit(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    g_quit = 1;
+    return JS_UNDEFINED;
+}
+
 /* nx.gc(): run one full collection and return its duration in ms (device-side probe). */
 static JSValue nx_gc(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     u64 t0 = armGetSystemTick();
@@ -159,6 +166,7 @@ static int run_session(void) {
     JS_SetPropertyStr(ctx, nx, "pad", JS_NewCFunction(ctx, nx_pad, "pad", 0));
     JS_SetPropertyStr(ctx, nx, "openMenu", JS_NewCFunction(ctx, nx_open_menu, "openMenu", 0));
     JS_SetPropertyStr(ctx, nx, "gc", JS_NewCFunction(ctx, nx_gc, "gc", 0));
+    JS_SetPropertyStr(ctx, nx, "quit", JS_NewCFunction(ctx, nx_quit, "quit", 0));
     JS_SetPropertyStr(ctx, nx, "mem", JS_NewCFunction(ctx, nx_mem, "mem", 0));
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, WIDTH));
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, HEIGHT));
