@@ -736,10 +736,21 @@
   //    order barely changes between updates. A stable insertion sort with the comparison inlined is ~n steps on
   //    nearly sorted input and gives the identical order. Only when the comparator is the (a.z||0)/(a.y||0)/
   //    spriteId one this game ships; anything else keeps the stock sort.
+  //    Reading .y is three interpreted getters (DisplayObject.y -> position -> ObservablePoint.y) per read, ~1600
+  //    a frame on a 550-child map. Where those are PIXI's own accessors the value is transform.position._y, read
+  //    directly; each child is checked once (its class keeps them, its position is an ObservablePoint) and keeps
+  //    the transform it was checked with in __yt, so a new transform is checked again (PIXI never replaces a
+  //    transform's position; a y accessor defined on a child after its check would be missed, nothing here does
+  //    that). A child that fails sends this call to the getter version, which resumes correctly on the partly
+  //    sorted array (a stable insertion sort). The predecessor's key is carried from the previous step, so on
+  //    sorted input each child is read once. Same comparisons on the same values in the same order, same result
+  //    (tests/tilemap_sort_verify.js checks every call against the getter version and the stock sort).
   {
-    const TM = g.Tilemap.prototype;
+    const TM = g.Tilemap.prototype, DO = g.PIXI.DisplayObject.prototype, OP = g.PIXI.ObservablePoint.prototype;
+    const hop = Object.prototype.hasOwnProperty, flat = (f) => (typeof f === "function" ? String(f) : "").replace(/\s+/g, "");
+    const getterIs = (o, k, s) => { const d = Object.getOwnPropertyDescriptor(o, k); return !!d && flat(d.get) === s; };
     if (String(TM._compareChildOrder).indexOf("(a.z || 0) !== (b.z || 0)") >= 0 && String(TM._sortChildren).length < 200) {
-      TM._sortChildren = function () {
+      const slow = function () {
         const a = this.children;
         for (let i = 1; i < a.length; i++) {
           const x = a[i], xz = x.z || 0, xy = x.y || 0, xs = x.spriteId;
@@ -751,6 +762,40 @@
             a[j + 1] = y;
           }
           a[j + 1] = x;
+        }
+      };
+      const yOK =   // pixi.js 4.5.4's accessors, whitespace removed
+        getterIs(DO, "y", "functionget(){returnthis.position.y;}") && getterIs(DO, "position", "functionget(){returnthis.transform.position;}") &&
+        getterIs(OP, "y", "functionget(){returnthis._y;}");
+      if (!yOK) nx.log("patch 8: the DisplayObject y accessors are not stock, tilemap sort reads .y");
+      const stockY = (o) => {   // o.y is o.transform.position._y
+        let p = o;
+        for (; p !== null && p !== DO; p = Object.getPrototypeOf(p)) if (hop.call(p, "y") || hop.call(p, "position")) return false;
+        const t = p === DO ? o.transform : null, pt = t ? t.position : null;
+        return !!pt && Object.getPrototypeOf(pt) === OP && !hop.call(pt, "y") && hop.call(pt, "_y");
+      };
+      TM._sortChildren = !yOK ? slow : function () {
+        const a = this.children, n = a.length;
+        if (n < 2) return;
+        const p = a[0];
+        let t = p.transform;   // addChild needs a transform: stock's .y throws where this does
+        if (p.__yt !== t) { if (!stockY(p)) return slow.call(this); p.__yt = t; }
+        let pz = p.z || 0, py = t.position._y || 0, ps = p.spriteId;
+        for (let i = 1; i < n; i++) {
+          const x = a[i];
+          t = x.transform;
+          if (x.__yt !== t) { if (!stockY(x)) return slow.call(this); x.__yt = t; }
+          const xz = x.z || 0, xy = t.position._y || 0, xs = x.spriteId;
+          if (pz < xz || (pz === xz && (py < xy || (py === xy && !(ps > xs))))) { pz = xz; py = xy; ps = xs; continue; }
+          let j = i - 1;
+          a[i] = a[j];
+          for (j--; j >= 0; j--) {   // a[0..i-1] were all checked in this call
+            const y = a[j], yz = y.z || 0;
+            if (yz < xz) break;
+            if (yz === xz) { const yy = y.transform.position._y || 0; if (yy < xy || (yy === xy && !(y.spriteId > xs))) break; }
+            a[j + 1] = y;
+          }
+          a[j + 1] = x;   // a[i] is now the old a[i-1], whose key is the one carried
         }
       };
     }
