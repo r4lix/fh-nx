@@ -1,5 +1,6 @@
 #pragma once
 #include "ControlsModel.hpp"
+#include "SettingsModel.hpp"
 #include "ModMenuModel.hpp"
 #include "imgui.h"
 #include <string>
@@ -15,7 +16,8 @@ public:
     };
 
     // `controls` (optional) adds the Controls tab; it is saved as soon as a binding changes.
-    explicit ModMenuUi(ModMenuModel& model, ControlsModel* controls = nullptr) : model_(model), controls_(controls) {}
+    explicit ModMenuUi(ModMenuModel& model, ControlsModel* controls = nullptr, SettingsModel* settings = nullptr)
+        : model_(model), controls_(controls), settings_(settings) {}
 
     // Call once per frame between NewFrame() and Render(). Returns true on the frame the
     // player pressed Apply; lastApplied() then holds what that cost (reload / restart).
@@ -37,6 +39,7 @@ public:
 private:
     ModMenuModel& model_;
     ControlsModel* controls_;
+    SettingsModel* settings_;
     size_t selected_ = 0;
     int sort_ = 0;                 // how the mod list is shown; the load order itself never changes with it
     size_t control_ = 0;
@@ -50,6 +53,7 @@ private:
 
     void tabMods();
     void tabControls();
+    void tabSystem();
     void tabPlugins();
     void tabHelp();
     void infoPane(ImVec2 pos, ImVec2 size);

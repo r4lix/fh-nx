@@ -1,4 +1,5 @@
 #include "mods_menu.h"
+#include "cpu_boost.h"
 #include "mods_state.hpp"
 
 #include <GLES2/gl2.h>
@@ -203,7 +204,8 @@ extern "C" int menu_init(const char* ttfPath, const char* title) {
     io.Fonts->SetTexID((ImTextureID)(intptr_t)g.fontTex);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    g.ui = std::make_unique<ModMenuUi>(*s.model, s.controls.get());
+    if (s.settings) s.settings->onCpuChange = [](int mhz) { cpu_boost_set(mhz); };
+    g.ui = std::make_unique<ModMenuUi>(*s.model, s.controls.get(), s.settings.get());
     g.title = title ? title : "Fear & Hunger";
     g.ready = true;
     return 1;

@@ -112,6 +112,8 @@ extern "C" int mods_init(const char* www, const char* modsDir, const char* ini) 
     size_t slash = c.find_last_of('/');
     s.controls = std::make_unique<ControlsModel>((slash == std::string::npos ? std::string() : c.substr(0, slash + 1)) + "controls.ini");
     s.controls->load();
+    s.settings = std::make_unique<SettingsModel>((slash == std::string::npos ? std::string() : c.substr(0, slash + 1)) + "settings.ini");
+    s.settings->load();
     return (int)n;
 }
 

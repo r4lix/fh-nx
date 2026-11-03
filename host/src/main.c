@@ -13,6 +13,7 @@
 
 #include "audio_mix.h"
 #include "audio_out.h"
+#include "cpu_boost.h"
 #include "js_alloc.h"
 #include "js_canvas.h"
 #include "js_gl.h"
@@ -50,6 +51,14 @@ static void say(const char *fmt, ...) {
     }
 }
 static void log_line(const char *s) { say("%s\n", s); }
+void fh_log(const char *fmt, ...) {                   /* for the other host modules (cpu_boost.c) */
+    char b[512];
+    va_list a;
+    va_start(a, fmt);
+    vsnprintf(b, sizeof b, fmt, a);
+    va_end(a);
+    say("%s", b);
+}
 
 /* ---- EGL ---------------------------------------------------------------------------------------- */
 
@@ -272,6 +281,7 @@ int main(int argc, char **argv) {
     PadState pad;
     padInitializeDefault(&pad);
     hidInitializeTouchScreen();
+    cpu_boost_init(cpu_boost_read_setting(BASE "/settings.ini"));   /* before loading: boot and map loads gain too */
     u64 minus_since = 0;
 
     Thread th;
@@ -302,6 +312,7 @@ int main(int argc, char **argv) {
     g_quit = 1;
     threadWaitForExit(&th);
     threadClose(&th);
+    cpu_boost_exit();
     if (g_log) fclose(g_log);
     return 0;
 }

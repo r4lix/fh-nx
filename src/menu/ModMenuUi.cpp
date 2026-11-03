@@ -39,12 +39,13 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     }
 
     if (ImGui::BeginTabBar("tabs")) {
-        enum { kMods, kControls, kPlugins, kHelp };
+        enum { kMods, kControls, kPlugins, kHelp, kSystem };
         std::vector<int> ids = {kMods};
         if (controls_) ids.push_back(kControls);
+        if (settings_) ids.push_back(kSystem);
         ids.push_back(kPlugins);
         ids.push_back(kHelp);
-        const char* names[] = {"Mods", "Controls", "Plugins", "Help"};
+        const char* names[] = {"Mods", "Controls", "Plugins", "Help", "System"};
         const int n = (int)ids.size();
         if (tabStep_ != 0) tab_ = (tab_ + tabStep_ + n) % n;
         for (int i = 0; i < n; i++) {
@@ -54,6 +55,7 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
                 tabId_ = ids[i];
                 if (ids[i] == kMods) tabMods();
                 else if (ids[i] == kControls) tabControls();
+                else if (ids[i] == kSystem) tabSystem();
                 else if (ids[i] == kPlugins) tabPlugins();
                 else tabHelp();
                 ImGui::EndTabItem();
@@ -187,6 +189,21 @@ void ModMenuUi::tabControls() {
     ImGui::EndDisabled();
 }
 
+void ModMenuUi::tabSystem() {
+    int mhz = settings_->cpuMhz();
+    std::string label = "Console default";
+    for (const auto& o : SettingsModel::cpuOptions())
+        if (o.mhz == mhz) label = o.label;
+    if (ImGui::Button(("CPU clock:  " + label).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) settings_->cycleCpu(+1);
+    if (focusFirst_) ImGui::SetItemDefaultFocus();
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+    ImGui::TextWrapped("Press A to change. Applied at once and kept for the next start. The game runs its JavaScript on the CPU, so "
+                       "a higher clock gives more frames per second on busy maps. The console's own clock comes back in the HOME menu "
+                       "and when the game exits. A clock manager (Horizon OC / sys-clk profile for this title) overrides this setting.");
+    ImGui::PopStyleColor();
+}
+
 void ModMenuUi::tabPlugins() {
     bool any = false;
     ImGui::TextColored(kDim, "Plugins added or changed by enabled mods");
@@ -233,6 +250,14 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // read-only: the pad stays on the list
 
+    if (tabId_ == 4 && settings_) {
+        ImGui::TextUnformatted("CPU clock");
+        ImGui::TextColored(kDim, "default: %d MHz", SettingsModel::kDefaultCpuMhz);
+        ImGui::TextWrapped("1700-1785 MHz is what many homebrew use; it is within the clocks the console itself offers. Higher clocks "
+                           "drain the battery faster.");
+        ImGui::End();
+        return;
+    }
     if (tabId_ == 1 && controls_) {
         const auto& a = ControlsModel::actions()[control_];
         ImGui::TextUnformatted(a.label);

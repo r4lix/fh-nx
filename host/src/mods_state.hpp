@@ -2,6 +2,7 @@
 #pragma once
 #include "../../src/menu/ControlsModel.hpp"
 #include "../../src/menu/ModMenuModel.hpp"
+#include "../../src/menu/SettingsModel.hpp"
 #include "../../src/vfs/ModManager.hpp"
 #include "../../src/vfs/Vfs.hpp"
 #include <memory>
@@ -12,6 +13,7 @@ struct ModsState {
     std::unique_ptr<Vfs> vfs;
     std::unique_ptr<ModMenuModel> model;
     std::unique_ptr<ControlsModel> controls;
+    std::unique_ptr<SettingsModel> settings;
     std::string www, modsDir, ini;
 };
 
