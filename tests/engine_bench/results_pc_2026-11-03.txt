@@ -1,0 +1,165 @@
+[bench] start qjs
+[bench] title after 2172 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 1.570 med 1.437 worst 15.0 ms | logic 0.863 ms/update (1.00/tick) | render 0.661 ms/tick | other 0.046 | transfer 113 ms | mem 100MB/396420obj | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 2.988 med 2.772 worst 15.8 ms | logic 2.006 ms/update (1.00/tick) | render 0.922 ms/tick | other 0.060 | transfer 159 ms | mem 128MB/474776obj | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 3.741 med 3.518 worst 18.8 ms | logic 2.214 ms/update (1.00/tick) | render 1.464 ms/tick | other 0.063 | transfer 160 ms | mem 150MB/541701obj | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 2.881 med 2.718 worst 14.1 ms | logic 1.928 ms/update (1.00/tick) | render 0.887 ms/tick | other 0.062 | transfer 244 ms | mem 118MB/420371obj | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 2.892 med 2.694 worst 15.8 ms | logic 1.974 ms/update (1.00/tick) | render 0.835 ms/tick | other 0.084 | transfer 147 ms | mem 114MB/418153obj | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 2.372 med 2.236 worst 13.9 ms | logic 1.572 ms/update (1.00/tick) | render 0.737 ms/tick | other 0.063 | transfer 151 ms | mem 153MB/514640obj | digest 15c1f7d
+[bench] summary qjs 74:1.570/0.863/0.661#f26ca7f1 93:2.988/2.006/0.922#13adca3b 80:3.741/2.214/1.464#a4ba59dd 185:2.881/1.928/0.887#55ff1a72 65:2.892/1.974/0.835#a760003e 3:2.372/1.572/0.737#15c1f7d
+[host] total 20.1 s, 0 tick errors
+[bench] start v8-jitless
+[bench] title after 1015 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.869 med 0.796 worst 6.6 ms | logic 0.458 ms/update (1.00/tick) | render 0.389 ms/tick | other 0.023 | transfer 54 ms | mem 50MB/144MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 1.555 med 1.414 worst 9.8 ms | logic 1.012 ms/update (1.00/tick) | render 0.515 ms/tick | other 0.028 | transfer 66 ms | mem 49MB/148MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 1.789 med 1.616 worst 10.1 ms | logic 0.999 ms/update (1.00/tick) | render 0.762 ms/tick | other 0.029 | transfer 66 ms | mem 63MB/158MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 1.395 med 1.284 worst 6.6 ms | logic 0.881 ms/update (1.00/tick) | render 0.483 ms/tick | other 0.030 | transfer 80 ms | mem 59MB/172MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 1.476 med 1.374 worst 7.2 ms | logic 0.991 ms/update (1.00/tick) | render 0.446 ms/tick | other 0.039 | transfer 60 ms | mem 69MB/184MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 1.247 med 1.124 worst 9.3 ms | logic 0.817 ms/update (1.00/tick) | render 0.401 ms/tick | other 0.028 | transfer 63 ms | mem 80MB/201MBrss | digest 15c1f7d
+[bench] summary v8-jitless 74:0.869/0.458/0.389#f26ca7f1 93:1.555/1.012/0.515#13adca3b 80:1.789/0.999/0.762#a4ba59dd 185:1.395/0.881/0.483#55ff1a72 65:1.476/0.991/0.446#a760003e 3:1.247/0.817/0.401#15c1f7d
+[host] total 10.1 s, 0 tick errors
+[bench] start v8-sparkplug
+[bench] title after 688 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.591 med 0.545 worst 5.2 ms | logic 0.325 ms/update (1.00/tick) | render 0.251 ms/tick | other 0.016 | transfer 40 ms | mem 52MB/143MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.979 med 0.898 worst 4.8 ms | logic 0.659 ms/update (1.00/tick) | render 0.301 ms/tick | other 0.020 | transfer 45 ms | mem 51MB/147MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 1.109 med 1.022 worst 5.1 ms | logic 0.646 ms/update (1.00/tick) | render 0.443 ms/tick | other 0.019 | transfer 43 ms | mem 65MB/158MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.896 med 0.840 worst 4.4 ms | logic 0.587 ms/update (1.00/tick) | render 0.288 ms/tick | other 0.020 | transfer 48 ms | mem 61MB/171MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 0.987 med 0.922 worst 5.0 ms | logic 0.683 ms/update (1.00/tick) | render 0.275 ms/tick | other 0.028 | transfer 46 ms | mem 72MB/184MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.822 med 0.755 worst 4.1 ms | logic 0.553 ms/update (1.00/tick) | render 0.248 ms/tick | other 0.020 | transfer 45 ms | mem 82MB/201MBrss | digest 15c1f7d
+[bench] summary v8-sparkplug 74:0.591/0.325/0.251#f26ca7f1 93:0.979/0.659/0.301#13adca3b 80:1.109/0.646/0.443#a4ba59dd 185:0.896/0.587/0.288#55ff1a72 65:0.987/0.683/0.275#a760003e 3:0.822/0.553/0.248#15c1f7d
+[host] total 6.9 s, 0 tick errors
+[bench] start v8-maglev
+[bench] title after 323 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.301 med 0.248 worst 3.9 ms | logic 0.193 ms/update (1.00/tick) | render 0.102 ms/tick | other 0.007 | transfer 29 ms | mem 54MB/135MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.503 med 0.464 worst 2.6 ms | logic 0.363 ms/update (1.00/tick) | render 0.133 ms/tick | other 0.007 | transfer 33 ms | mem 69MB/144MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 0.548 med 0.491 worst 2.5 ms | logic 0.352 ms/update (1.00/tick) | render 0.189 ms/tick | other 0.007 | transfer 29 ms | mem 55MB/163MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.567 med 0.457 worst 4.8 ms | logic 0.395 ms/update (1.00/tick) | render 0.160 ms/tick | other 0.011 | transfer 28 ms | mem 63MB/177MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 0.526 med 0.471 worst 3.1 ms | logic 0.379 ms/update (1.00/tick) | render 0.131 ms/tick | other 0.015 | transfer 35 ms | mem 67MB/189MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.415 med 0.368 worst 2.1 ms | logic 0.294 ms/update (1.00/tick) | render 0.114 ms/tick | other 0.008 | transfer 33 ms | mem 72MB/207MBrss | digest 15c1f7d
+[bench] summary v8-maglev 74:0.301/0.193/0.102#f26ca7f1 93:0.503/0.363/0.133#13adca3b 80:0.548/0.352/0.189#a4ba59dd 185:0.567/0.395/0.160#55ff1a72 65:0.526/0.379/0.131#a760003e 3:0.415/0.294/0.114#15c1f7d
+[host] total 3.9 s, 0 tick errors
+[bench] start v8-full
+[bench] title after 302 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.305 med 0.250 worst 4.2 ms | logic 0.196 ms/update (1.00/tick) | render 0.101 ms/tick | other 0.007 | transfer 30 ms | mem 55MB/138MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.496 med 0.448 worst 2.6 ms | logic 0.354 ms/update (1.00/tick) | render 0.134 ms/tick | other 0.008 | transfer 32 ms | mem 70MB/147MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 0.556 med 0.491 worst 2.9 ms | logic 0.354 ms/update (1.00/tick) | render 0.195 ms/tick | other 0.007 | transfer 28 ms | mem 81MB/166MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.490 med 0.421 worst 3.4 ms | logic 0.344 ms/update (1.00/tick) | render 0.137 ms/tick | other 0.009 | transfer 28 ms | mem 63MB/181MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 0.519 med 0.471 worst 2.4 ms | logic 0.373 ms/update (1.00/tick) | render 0.131 ms/tick | other 0.015 | transfer 24 ms | mem 67MB/193MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.414 med 0.371 worst 2.0 ms | logic 0.292 ms/update (1.00/tick) | render 0.114 ms/tick | other 0.007 | transfer 31 ms | mem 71MB/212MBrss | digest 15c1f7d
+[bench] summary v8-full 74:0.305/0.196/0.101#f26ca7f1 93:0.496/0.354/0.134#13adca3b 80:0.556/0.354/0.195#a4ba59dd 185:0.490/0.344/0.137#55ff1a72 65:0.519/0.373/0.131#a760003e 3:0.414/0.292/0.114#15c1f7d
+[host] total 3.9 s, 0 tick errors
+[bench] start qjs
+[bench] title after 2116 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 1.550 med 1.415 worst 15.0 ms | logic 0.858 ms/update (1.00/tick) | render 0.647 ms/tick | other 0.045 | transfer 117 ms | mem 100MB/396420obj | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 2.964 med 2.749 worst 15.2 ms | logic 1.985 ms/update (1.00/tick) | render 0.919 ms/tick | other 0.060 | transfer 158 ms | mem 128MB/474776obj | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 3.751 med 3.504 worst 17.1 ms | logic 2.221 ms/update (1.00/tick) | render 1.465 ms/tick | other 0.065 | transfer 159 ms | mem 150MB/541701obj | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 2.977 med 2.707 worst 18.3 ms | logic 1.974 ms/update (1.00/tick) | render 0.935 ms/tick | other 0.065 | transfer 243 ms | mem 118MB/420371obj | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 2.920 med 2.726 worst 15.0 ms | logic 1.991 ms/update (1.00/tick) | render 0.845 ms/tick | other 0.084 | transfer 156 ms | mem 114MB/418153obj | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 2.394 med 2.237 worst 13.7 ms | logic 1.579 ms/update (1.00/tick) | render 0.751 ms/tick | other 0.064 | transfer 154 ms | mem 153MB/514640obj | digest 15c1f7d
+[bench] summary qjs 74:1.550/0.858/0.647#f26ca7f1 93:2.964/1.985/0.919#13adca3b 80:3.751/2.221/1.465#a4ba59dd 185:2.977/1.974/0.935#55ff1a72 65:2.920/1.991/0.845#a760003e 3:2.394/1.579/0.751#15c1f7d
+[host] total 20.1 s, 0 tick errors
+[bench] start v8-jitless
+[bench] title after 1007 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.881 med 0.791 worst 7.4 ms | logic 0.467 ms/update (1.00/tick) | render 0.391 ms/tick | other 0.023 | transfer 52 ms | mem 50MB/143MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 1.509 med 1.390 worst 6.6 ms | logic 0.985 ms/update (1.00/tick) | render 0.497 ms/tick | other 0.028 | transfer 73 ms | mem 49MB/147MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 1.745 med 1.557 worst 7.2 ms | logic 0.980 ms/update (1.00/tick) | render 0.735 ms/tick | other 0.030 | transfer 69 ms | mem 63MB/157MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 1.411 med 1.311 worst 7.0 ms | logic 0.890 ms/update (1.00/tick) | render 0.490 ms/tick | other 0.030 | transfer 74 ms | mem 59MB/171MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 1.513 med 1.380 worst 7.1 ms | logic 1.014 ms/update (1.00/tick) | render 0.460 ms/tick | other 0.038 | transfer 70 ms | mem 69MB/184MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 1.293 med 1.177 worst 5.5 ms | logic 0.838 ms/update (1.00/tick) | render 0.425 ms/tick | other 0.030 | transfer 70 ms | mem 80MB/201MBrss | digest 15c1f7d
+[bench] summary v8-jitless 74:0.881/0.467/0.391#f26ca7f1 93:1.509/0.985/0.497#13adca3b 80:1.745/0.980/0.735#a4ba59dd 185:1.411/0.890/0.490#55ff1a72 65:1.513/1.014/0.460#a760003e 3:1.293/0.838/0.425#15c1f7d
+[host] total 10.1 s, 0 tick errors
+[bench] start v8-sparkplug
+[bench] title after 684 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.600 med 0.544 worst 6.3 ms | logic 0.331 ms/update (1.00/tick) | render 0.253 ms/tick | other 0.016 | transfer 39 ms | mem 51MB/143MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.952 med 0.879 worst 4.6 ms | logic 0.638 ms/update (1.00/tick) | render 0.295 ms/tick | other 0.018 | transfer 49 ms | mem 50MB/147MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 1.106 med 1.021 worst 4.9 ms | logic 0.649 ms/update (1.00/tick) | render 0.437 ms/tick | other 0.020 | transfer 47 ms | mem 65MB/157MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.895 med 0.828 worst 4.0 ms | logic 0.587 ms/update (1.00/tick) | render 0.286 ms/tick | other 0.021 | transfer 48 ms | mem 61MB/171MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 1.004 med 0.914 worst 5.0 ms | logic 0.694 ms/update (1.00/tick) | render 0.282 ms/tick | other 0.028 | transfer 43 ms | mem 71MB/184MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.817 med 0.760 worst 4.5 ms | logic 0.546 ms/update (1.00/tick) | render 0.251 ms/tick | other 0.020 | transfer 46 ms | mem 82MB/201MBrss | digest 15c1f7d
+[bench] summary v8-sparkplug 74:0.600/0.331/0.253#f26ca7f1 93:0.952/0.638/0.295#13adca3b 80:1.106/0.649/0.437#a4ba59dd 185:0.895/0.587/0.286#55ff1a72 65:1.004/0.694/0.282#a760003e 3:0.817/0.546/0.251#15c1f7d
+[host] total 6.8 s, 0 tick errors
+[bench] start v8-maglev
+[bench] title after 314 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.305 med 0.253 worst 4.0 ms | logic 0.195 ms/update (1.00/tick) | render 0.103 ms/tick | other 0.007 | transfer 28 ms | mem 54MB/134MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.507 med 0.462 worst 2.5 ms | logic 0.367 ms/update (1.00/tick) | render 0.133 ms/tick | other 0.007 | transfer 46 ms | mem 69MB/144MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 0.544 med 0.492 worst 2.4 ms | logic 0.348 ms/update (1.00/tick) | render 0.189 ms/tick | other 0.007 | transfer 28 ms | mem 80MB/163MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.455 med 0.403 worst 2.0 ms | logic 0.320 ms/update (1.00/tick) | render 0.126 ms/tick | other 0.008 | transfer 26 ms | mem 63MB/177MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 0.520 med 0.474 worst 2.5 ms | logic 0.377 ms/update (1.00/tick) | render 0.127 ms/tick | other 0.015 | transfer 25 ms | mem 67MB/189MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.413 med 0.370 worst 1.8 ms | logic 0.289 ms/update (1.00/tick) | render 0.116 ms/tick | other 0.007 | transfer 31 ms | mem 72MB/207MBrss | digest 15c1f7d
+[bench] summary v8-maglev 74:0.305/0.195/0.103#f26ca7f1 93:0.507/0.367/0.133#13adca3b 80:0.544/0.348/0.189#a4ba59dd 185:0.455/0.320/0.126#55ff1a72 65:0.520/0.377/0.127#a760003e 3:0.413/0.289/0.116#15c1f7d
+[host] total 3.9 s, 0 tick errors
+[bench] start v8-full
+[bench] title after 301 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.308 med 0.253 worst 4.5 ms | logic 0.198 ms/update (1.00/tick) | render 0.103 ms/tick | other 0.007 | transfer 27 ms | mem 55MB/140MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.502 med 0.450 worst 2.5 ms | logic 0.356 ms/update (1.00/tick) | render 0.138 ms/tick | other 0.007 | transfer 40 ms | mem 70MB/149MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 0.553 med 0.486 worst 2.7 ms | logic 0.350 ms/update (1.00/tick) | render 0.197 ms/tick | other 0.007 | transfer 29 ms | mem 81MB/168MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.474 med 0.425 worst 2.0 ms | logic 0.331 ms/update (1.00/tick) | render 0.134 ms/tick | other 0.009 | transfer 28 ms | mem 63MB/183MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 0.519 med 0.468 worst 2.5 ms | logic 0.369 ms/update (1.00/tick) | render 0.135 ms/tick | other 0.015 | transfer 26 ms | mem 67MB/196MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.697 med 0.517 worst 6.6 ms | logic 0.483 ms/update (1.00/tick) | render 0.200 ms/tick | other 0.014 | transfer 33 ms | mem 71MB/215MBrss | digest 15c1f7d
+[bench] summary v8-full 74:0.308/0.198/0.103#f26ca7f1 93:0.502/0.356/0.138#13adca3b 80:0.553/0.350/0.197#a4ba59dd 185:0.474/0.331/0.134#55ff1a72 65:0.519/0.369/0.135#a760003e 3:0.697/0.483/0.200#15c1f7d
+[host] total 4.1 s, 0 tick errors
+[bench] start qjs
+[bench] title after 2325 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 1.603 med 1.464 worst 16.6 ms | logic 0.886 ms/update (1.00/tick) | render 0.671 ms/tick | other 0.046 | transfer 116 ms | mem 100MB/396420obj | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 2.911 med 2.763 worst 14.6 ms | logic 1.949 ms/update (1.00/tick) | render 0.903 ms/tick | other 0.059 | transfer 159 ms | mem 128MB/474776obj | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 3.702 med 3.464 worst 19.0 ms | logic 2.200 ms/update (1.00/tick) | render 1.439 ms/tick | other 0.064 | transfer 161 ms | mem 150MB/541701obj | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 3.132 med 2.767 worst 18.6 ms | logic 2.097 ms/update (1.00/tick) | render 0.964 ms/tick | other 0.067 | transfer 306 ms | mem 118MB/420371obj | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 2.813 med 2.596 worst 15.3 ms | logic 1.927 ms/update (1.00/tick) | render 0.807 ms/tick | other 0.079 | transfer 145 ms | mem 114MB/418153obj | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 2.962 med 2.775 worst 14.9 ms | logic 1.934 ms/update (1.00/tick) | render 0.948 ms/tick | other 0.079 | transfer 157 ms | mem 153MB/514640obj | digest 15c1f7d
+[bench] summary qjs 74:1.603/0.886/0.671#f26ca7f1 93:2.911/1.949/0.903#13adca3b 80:3.702/2.200/1.439#a4ba59dd 185:3.132/2.097/0.964#55ff1a72 65:2.813/1.927/0.807#a760003e 3:2.962/1.934/0.948#15c1f7d
+[host] total 20.9 s, 0 tick errors
+[bench] start v8-jitless
+[bench] title after 1169 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 1.015 med 0.887 worst 6.9 ms | logic 0.545 ms/update (1.00/tick) | render 0.443 ms/tick | other 0.027 | transfer 95 ms | mem 50MB/140MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 1.774 med 1.632 worst 7.1 ms | logic 1.160 ms/update (1.00/tick) | render 0.581 ms/tick | other 0.033 | transfer 68 ms | mem 49MB/144MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 2.077 med 1.877 worst 8.3 ms | logic 1.165 ms/update (1.00/tick) | render 0.877 ms/tick | other 0.036 | transfer 84 ms | mem 63MB/155MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 1.609 med 1.448 worst 8.6 ms | logic 1.030 ms/update (1.00/tick) | render 0.542 ms/tick | other 0.036 | transfer 82 ms | mem 59MB/169MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 1.798 med 1.628 worst 6.5 ms | logic 1.209 ms/update (1.00/tick) | render 0.543 ms/tick | other 0.047 | transfer 68 ms | mem 69MB/181MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 1.684 med 1.453 worst 6.9 ms | logic 1.101 ms/update (1.00/tick) | render 0.545 ms/tick | other 0.038 | transfer 78 ms | mem 80MB/198MBrss | digest 15c1f7d
+[bench] summary v8-jitless 74:1.015/0.545/0.443#f26ca7f1 93:1.774/1.160/0.581#13adca3b 80:2.077/1.165/0.877#a4ba59dd 185:1.609/1.030/0.542#55ff1a72 65:1.798/1.209/0.543#a760003e 3:1.684/1.101/0.545#15c1f7d
+[host] total 12.1 s, 0 tick errors
+[bench] start v8-sparkplug
+[bench] title after 788 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.729 med 0.614 worst 5.8 ms | logic 0.406 ms/update (1.00/tick) | render 0.302 ms/tick | other 0.021 | transfer 45 ms | mem 52MB/143MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 1.357 med 1.101 worst 11.1 ms | logic 0.919 ms/update (1.00/tick) | render 0.412 ms/tick | other 0.027 | transfer 77 ms | mem 51MB/147MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 1.364 med 1.195 worst 5.8 ms | logic 0.791 ms/update (1.00/tick) | render 0.547 ms/tick | other 0.026 | transfer 54 ms | mem 65MB/158MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 1.060 med 0.950 worst 4.3 ms | logic 0.696 ms/update (1.00/tick) | render 0.338 ms/tick | other 0.025 | transfer 59 ms | mem 61MB/171MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 1.157 med 1.023 worst 8.5 ms | logic 0.799 ms/update (1.00/tick) | render 0.324 ms/tick | other 0.034 | transfer 53 ms | mem 72MB/184MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.935 med 0.854 worst 4.3 ms | logic 0.627 ms/update (1.00/tick) | render 0.285 ms/tick | other 0.024 | transfer 48 ms | mem 82MB/201MBrss | digest 15c1f7d
+[bench] summary v8-sparkplug 74:0.729/0.406/0.302#f26ca7f1 93:1.357/0.919/0.412#13adca3b 80:1.364/0.791/0.547#a4ba59dd 185:1.060/0.696/0.338#55ff1a72 65:1.157/0.799/0.324#a760003e 3:0.935/0.627/0.285#15c1f7d
+[host] total 8.2 s, 0 tick errors
+[bench] start v8-maglev
+[bench] title after 412 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.337 med 0.276 worst 5.8 ms | logic 0.218 ms/update (1.00/tick) | render 0.112 ms/tick | other 0.007 | transfer 33 ms | mem 54MB/135MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.601 med 0.537 worst 2.4 ms | logic 0.433 ms/update (1.00/tick) | render 0.159 ms/tick | other 0.009 | transfer 34 ms | mem 69MB/144MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 0.780 med 0.628 worst 9.8 ms | logic 0.494 ms/update (1.00/tick) | render 0.276 ms/tick | other 0.010 | transfer 30 ms | mem 55MB/163MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.561 med 0.495 worst 2.7 ms | logic 0.387 ms/update (1.00/tick) | render 0.163 ms/tick | other 0.011 | transfer 66 ms | mem 63MB/177MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 0.624 med 0.554 worst 3.6 ms | logic 0.449 ms/update (1.00/tick) | render 0.158 ms/tick | other 0.017 | transfer 36 ms | mem 67MB/189MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.499 med 0.435 worst 2.1 ms | logic 0.351 ms/update (1.00/tick) | render 0.138 ms/tick | other 0.010 | transfer 35 ms | mem 72MB/207MBrss | digest 15c1f7d
+[bench] summary v8-maglev 74:0.337/0.218/0.112#f26ca7f1 93:0.601/0.433/0.159#13adca3b 80:0.780/0.494/0.276#a4ba59dd 185:0.561/0.387/0.163#55ff1a72 65:0.624/0.449/0.158#a760003e 3:0.499/0.351/0.138#15c1f7d
+[host] total 4.7 s, 0 tick errors
+[bench] start v8-full
+[bench] title after 330 ms real, tick 317
+[bench] in save map 93
+[bench] map 74 Fortress events 156 | tick avg 0.336 med 0.277 worst 4.7 ms | logic 0.215 ms/update (1.00/tick) | render 0.114 ms/tick | other 0.008 | transfer 33 ms | mem 55MB/140MBrss | digest f26ca7f1
+[bench] map 93 Level8_A events 412 | tick avg 0.609 med 0.539 worst 3.0 ms | logic 0.426 ms/update (1.00/tick) | render 0.174 ms/tick | other 0.009 | transfer 37 ms | mem 70MB/150MBrss | digest 13adca3b
+[bench] map 80 Back_alleys events 535 | tick avg 0.632 med 0.560 worst 3.1 ms | logic 0.401 ms/update (1.00/tick) | render 0.222 ms/tick | other 0.008 | transfer 37 ms | mem 81MB/169MBrss | digest a4ba59dd
+[bench] map 185 The_Void2 events 360 | tick avg 0.508 med 0.452 worst 2.3 ms | logic 0.356 ms/update (1.00/tick) | render 0.142 ms/tick | other 0.009 | transfer 35 ms | mem 63MB/183MBrss | digest 55ff1a72
+[bench] map 65 Level8_2_A events 401 | tick avg 0.568 med 0.501 worst 3.1 ms | logic 0.408 ms/update (1.00/tick) | render 0.145 ms/tick | other 0.016 | transfer 28 ms | mem 67MB/196MBrss | digest a760003e
+[bench] map 3 Level1_3_A events 350 | tick avg 0.462 med 0.407 worst 2.1 ms | logic 0.323 ms/update (1.00/tick) | render 0.130 ms/tick | other 0.008 | transfer 34 ms | mem 71MB/215MBrss | digest 15c1f7d
+[bench] summary v8-full 74:0.336/0.215/0.114#f26ca7f1 93:0.609/0.426/0.174#13adca3b 80:0.632/0.401/0.222#a4ba59dd 185:0.508/0.356/0.142#55ff1a72 65:0.568/0.408/0.145#a760003e 3:0.462/0.323/0.130#15c1f7d
+[host] total 4.3 s, 0 tick errors
