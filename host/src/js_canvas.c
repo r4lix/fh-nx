@@ -689,6 +689,75 @@ static void rect_gradient(Ctx *c, int ix0, int iy0, int ix1, int iy1, const Pain
     }
 }
 
+/* Solid axis-aligned rectangle with fractional device edges (TerraxLighting's 866x630 mask fills land on
+ * half pixels once the mask is drawn at 1/4 scale). Reproduces fill_polys + paint_row exactly: the same SS
+ * vertical sub-scanlines, the same float coverage sums per pixel, the same put_px for partially covered
+ * pixels; runs of fully covered pixels go through span_solid, which equals blend_px at coverage 255.
+ * Built with -ffast-math on the device, so the sums are kept in fill_polys' order (one add per sub-scanline)
+ * and the finiteness test reads the exponent bits (isfinite folds to 1 under -ffinite-math-only).
+ * nx.__fracFast(0) routes these fills back to fill_polys (tests/frac_fill_equiv.js, tests/frac_fill_ingame.js). */
+static int g_frac_fast = 1;
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assoc_barrier)
+#define ASSOC_BARRIER(e) __builtin_assoc_barrier(e)
+#endif
+#endif
+#ifndef ASSOC_BARRIER
+#define ASSOC_BARRIER(e) (e)
+#endif
+static inline int finite_bits(double v) {
+    uint64_t u;
+    memcpy(&u, &v, sizeof u);
+    return (u & 0x7ff0000000000000ull) != 0x7ff0000000000000ull;
+}
+static void frac_px(Ctx *c, int x, int y, RGBA col, float cv) {
+    if (cv <= 0.002f) return;
+    int cv255 = cv >= 1.0f ? 255 : (int)(cv * 255 + 0.5f);
+    put_px(c, x, y, col, cv255);
+}
+static void fill_rect_frac_solid(Ctx *c, double x0, double y0, double x1, double y1, const Paint *p) {
+    int W = c->s->w, H = c->s->h;
+    if (y0 == y1) return;                                   /* no non-horizontal edge: fill_polys draws nothing */
+    int ys = (int)floor(y0), ye = (int)ceil(y1);
+    if (ys < 0) ys = 0;
+    if (ye > H) ye = H;
+    int xlo = (int)floor(x0), xhi = (int)ceil(x1);
+    if (xlo < 0) xlo = 0;
+    if (xhi > W) xhi = W;
+    if (xhi <= xlo) return;
+    double xa = x0, xb = x1;
+    if (xb <= xlo || xa >= xhi) return;
+    if (xa < xlo) xa = xlo;
+    if (xb > xhi) xb = xhi;
+    int ia = (int)floor(xa), ib = (int)floor(xb);
+    float fl = (float)((ia + 1 - xa) / SS), fr = (float)((xb - ib) / SS), f1 = (float)((xb - xa) / SS);
+    RGBA col = p->c;
+    int a = mul255(col.a, global_alpha255(&c->st));
+    OverLut lut = {{{0}}, 0};
+    for (int y = ys; y < ye; y++) {
+        int nv = 0;
+        for (int k = 0; k < SS; k++) {
+            double sy = y + (k + 0.5) / SS;
+            if (!(sy < y0 || sy >= y1)) nv++;
+        }
+        if (!nv) continue;
+        if (ia == ib) {
+            float cv = 0;
+            for (int k = 0; k < nv; k++) cv = ASSOC_BARRIER(cv + f1);
+            frac_px(c, ia, y, col, cv);
+            continue;
+        }
+        float cl = 0, cr = 0, ci = 0;
+        for (int k = 0; k < nv; k++) { cl = ASSOC_BARRIER(cl + fl); cr = ASSOC_BARRIER(cr + fr); ci = ASSOC_BARRIER(ci + 1.0f / SS); }
+        frac_px(c, ia, y, col, cl);
+        if (ib > ia + 1) {
+            if (ci >= 1.0f) span_solid(c, y, ia + 1, ib, col, a, &lut);
+            else for (int x = ia + 1; x < ib; x++) frac_px(c, x, y, col, ci);
+        }
+        if (ib < xhi) frac_px(c, ib, y, col, cr);
+    }
+}
+
 /* Axis-aligned rectangle, device space. Integer edges take the span fast paths. */
 static void fill_rect_dev(Ctx *c, double x0, double y0, double x1, double y1, const Paint *p) {
     if (x1 < x0) { double t = x0; x0 = x1; x1 = t; }
@@ -715,6 +784,10 @@ static void fill_rect_dev(Ctx *c, double x0, double y0, double x1, double y1, co
         if (jx1 > c->s->w) jx1 = c->s->w;
         if (jy1 > c->s->h) jy1 = c->s->h;
         rect_gradient(c, jx0, jy0, jx1, jy1, p);
+        return;
+    }
+    if (!p->g && g_frac_fast && finite_bits(x0) && finite_bits(x1) && finite_bits(y0) && finite_bits(y1)) {
+        fill_rect_frac_solid(c, x0, y0, x1, y1, p);
         return;
     }
     Pt pts[4] = {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}};
@@ -1845,6 +1918,13 @@ static JSValue nx_decode_image(JSContext *ctx, JSValueConst self, int argc, JSVa
     return o;
 }
 
+/* test hook: nx.__fracFast(0|1) turns the fractional-edge solid fillRect path off/on (on by default) */
+static JSValue nx_frac_fast(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    int v = 1;
+    if (argc > 0) JS_ToInt32(ctx, &v, argv[0]);
+    g_frac_fast = v;
+    return JS_UNDEFINED;
+}
 static JSValue nx_create_context(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     Surface *s = JS_GetOpaque2(ctx, argv[0], surface_class);
     if (!s) return JS_EXCEPTION;
@@ -1915,5 +1995,6 @@ void js_canvas_init(JSContext *ctx, JSValueConst nx) {
     JS_SetPropertyStr(ctx, nx, "surfaceFromRGBA", JS_NewCFunction(ctx, nx_surface_from_rgba, "surfaceFromRGBA", 3));
     JS_SetPropertyStr(ctx, nx, "decodeImage", JS_NewCFunction(ctx, nx_decode_image, "decodeImage", 1));
     JS_SetPropertyStr(ctx, nx, "createContext", JS_NewCFunction(ctx, nx_create_context, "createContext", 2));
+    JS_SetPropertyStr(ctx, nx, "__fracFast", JS_NewCFunction(ctx, nx_frac_fast, "__fracFast", 1));
     JS_SetPropertyStr(ctx, nx, "registerFont", JS_NewCFunction(ctx, nx_register_font, "registerFont", 2));
 }
