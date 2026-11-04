@@ -117,6 +117,14 @@ static JSValue nx_open_menu(JSContext *ctx, JSValueConst self, int argc, JSValue
 
 /* nx.quit(): end the app the normal way (MV's SceneManager.exit -> window.close, and scripted test runs): the loops see g_quit,
  * the session ends and main returns, so a launcher (hbmenu, SwitchLink) gets the console back. */
+/* nx.restart(): start the game again in a fresh JS runtime, the way the mods menu's Apply does (scripted tests of that path). */
+static volatile int g_restart_req;
+static int g_session;
+static JSValue nx_restart(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    g_restart_req = 1;
+    return JS_UNDEFINED;
+}
+
 static JSValue nx_quit(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     g_quit = 1;
     return JS_UNDEFINED;
@@ -255,6 +263,8 @@ static int run_session(void) {
     JS_SetPropertyStr(ctx, nx, "openMenu", JS_NewCFunction(ctx, nx_open_menu, "openMenu", 0));
     JS_SetPropertyStr(ctx, nx, "gc", JS_NewCFunction(ctx, nx_gc, "gc", 0));
     JS_SetPropertyStr(ctx, nx, "quit", JS_NewCFunction(ctx, nx_quit, "quit", 0));
+    JS_SetPropertyStr(ctx, nx, "restart", JS_NewCFunction(ctx, nx_restart, "restart", 0));
+    JS_SetPropertyStr(ctx, nx, "session", JS_NewInt32(ctx, ++g_session));
     JS_SetPropertyStr(ctx, nx, "mem", JS_NewCFunction(ctx, nx_mem, "mem", 0));
 #ifdef FH_V8
     JS_SetPropertyStr(ctx, nx, "engine", JS_NewString(ctx, "v8"));
@@ -285,7 +295,9 @@ static int run_session(void) {
     int menu_ok = menu_init(BASE "/www/fonts/Eczar-Regular.ttf", "Fear & Hunger"), menu_open = 0;
     say("mods menu: %s\n", menu_ok ? "ready (hold - for 2 s)" : "unavailable");
 
+    g_restart_req = 0;
     while (ok && !g_quit) {
+        if (g_restart_req) { restart = 1; break; }
         u64 a = armGetSystemTick();
         int snap_now = g_menu_req && menu_ok && !menu_open;      /* run one more game frame, keep it as the menu's backdrop */
         if (snap_now) g_menu_req = 0;

@@ -290,20 +290,29 @@ static void v8_global_init() {
   atexit(horizon_mman_teardown);   // releases the backend's arena mappings before libnx hands the process back
 }
 
+// One isolate for the whole process: the mods menu's Apply starts the game again in a fresh runtime, and a disposed isolate's
+// memory (the 64 MiB JIT code range, V8's own reservations) never comes back from switch-v8's backend, so a third isolate
+// failed to start. A "runtime" is the game's JS world: a new context in the kept isolate.
+static v8::Isolate* g_iso;
+static v8::ArrayBuffer::Allocator* g_aba;
 extern "C" JSRuntime* JS_NewRuntime2(const JSMallocFunctions*, void*) {
   v8_global_init();
   JSRuntime* rt = new JSRuntime();
-  v8::Isolate::CreateParams cp;
-  rt->aba = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
-  cp.array_buffer_allocator = rt->aba;
-  if (g_flags.find("--jitless") == std::string::npos) cp.constraints.set_code_range_size_in_bytes(64u << 20);
-  rt->iso = v8::Isolate::New(cp);
-  rt->iso->Enter();
-  rt->iso->SetFatalErrorHandler(on_fatal);
-  rt->iso->SetOOMErrorHandler(on_oom);
-  rt->iso->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
-  rt->iso->AddGCPrologueCallback(gc_pro);
-  rt->iso->AddGCEpilogueCallback(gc_epi);
+  if (!g_iso) {
+    v8::Isolate::CreateParams cp;
+    g_aba = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
+    cp.array_buffer_allocator = g_aba;
+    if (g_flags.find("--jitless") == std::string::npos) cp.constraints.set_code_range_size_in_bytes(64u << 20);
+    g_iso = v8::Isolate::New(cp);
+    g_iso->Enter();
+    g_iso->SetFatalErrorHandler(on_fatal);
+    g_iso->SetOOMErrorHandler(on_oom);
+    g_iso->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
+    g_iso->AddGCPrologueCallback(gc_pro);
+    g_iso->AddGCEpilogueCallback(gc_epi);
+  }
+  rt->iso = g_iso;
+  rt->aba = g_aba;
   rt->classes.resize(16);
   return rt;
 }
@@ -329,11 +338,9 @@ extern "C" void JS_FreeRuntime(JSRuntime* rt) {
     rt->objs.clear();
     for (ClassRec& c : rt->classes) { c.proto.Reset(); c.ctor.Reset(); }
   }
-  rt->iso->Exit();
-  rt->iso->Dispose();
-  for (FnRec* f : rt->fns) delete f;
-  delete rt->aba;
-  delete rt;
+  // the isolate stays (see JS_NewRuntime2); the old context's objects are garbage now: collect them before the next start
+  rt->iso->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
+  delete rt;   // FnRecs stay: functions of the old context may still sit in the heap until a GC (a few KB per start)
 }
 extern "C" JSContext* JS_NewContext(JSRuntime* rt) {
   JSContext* ctx = new JSContext();
