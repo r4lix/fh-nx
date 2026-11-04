@@ -20,7 +20,7 @@ static int s_level;            /* Auto: index in k_levels */
 static const int k_levels[] = {0, 1224, 1428, 1581, 1785};   /* 0 = the console's own clock (1020 MHz) */
 #define N_LEVELS ((int)(sizeof k_levels / sizeof k_levels[0]))
 #define STOCK_MHZ 1020
-static double s_win_ms, s_win_n, s_win_over, s_calm_ms, s_calm_n, s_calm_peak;
+static double s_win_ms, s_win_n, s_win_over, s_calm_ms, s_calm_n, s_calm_over;
 static u64 s_win_t0, s_calm_t0, s_last_change;
 static int s_in_focus = 1;
 static int s_applied;          /* an override / rate is currently set by us */
@@ -126,7 +126,8 @@ void cpu_boost_exit(void) {
 
 /* Auto clock. The game has 16.7 ms per frame. Up one step as soon as it runs short (half a second averaging over 12.5 ms of work,
  * or 3 frames over budget); down one step only after 3 calm seconds in which the lower clock would still leave room (work scaled
- * by the clock ratio stays under 10 ms on average and 15 ms at worst). At most one step every half second. */
+ * by the clock ratio under 10 ms on average, at most 2 frames that would miss the budget: a lone GC or load spike does not hold
+ * the clock up). At most one step every half second. */
 static void set_level_locked(int lv, double ms) {
     if (lv < 0) lv = 0;
     if (lv >= N_LEVELS) lv = N_LEVELS - 1;
@@ -142,18 +143,21 @@ void cpu_boost_frame(double work_ms) {
     if (!s_auto || (!s_mgr && !s_open)) return;
     u64 now = armGetSystemTick(), f = armGetSystemTickFreq();
     mutexLock(&s_lock);
-    if (!s_win_t0) { s_win_t0 = s_calm_t0 = now; s_win_ms = s_win_n = s_win_over = s_calm_ms = s_calm_n = s_calm_peak = 0; }
+    if (!s_win_t0) { s_win_t0 = s_calm_t0 = now; s_win_ms = s_win_n = s_win_over = s_calm_ms = s_calm_n = s_calm_over = 0; }
     s_win_ms += work_ms; s_win_n++;
     if (work_ms > 16.7) s_win_over++;
     s_calm_ms += work_ms; s_calm_n++;
-    if (work_ms > s_calm_peak) s_calm_peak = work_ms;
+    if (s_level > 0) {                                 /* would this frame miss the budget one step lower? */
+        double lower = k_levels[s_level - 1] ? k_levels[s_level - 1] : STOCK_MHZ;
+        if (work_ms * k_levels[s_level] / lower > 16.0) s_calm_over++;
+    }
     int can_step = now - s_last_change > f / 2;
     if (now - s_win_t0 > f / 2) {
         double avg = s_win_ms / s_win_n;
         if (can_step && s_level < N_LEVELS - 1 && (avg > 12.5 || s_win_over >= 3)) {
             set_level_locked(s_level + 1, avg);
             s_last_change = now;
-            s_calm_t0 = now; s_calm_ms = s_calm_n = s_calm_peak = 0;
+            s_calm_t0 = now; s_calm_ms = s_calm_n = s_calm_over = 0;
         }
         s_win_t0 = now; s_win_ms = s_win_n = s_win_over = 0;
     }
@@ -161,9 +165,9 @@ void cpu_boost_frame(double work_ms) {
         if (s_level > 0 && can_step) {
             double cur = k_levels[s_level], lower = k_levels[s_level - 1] ? k_levels[s_level - 1] : STOCK_MHZ, k = cur / lower;
             double avg = s_calm_ms / s_calm_n;
-            if (avg * k < 10.0 && s_calm_peak * k < 15.0) { set_level_locked(s_level - 1, avg); s_last_change = now; }
+            if (avg * k < 10.0 && s_calm_over <= 2) { set_level_locked(s_level - 1, avg); s_last_change = now; }
         }
-        s_calm_t0 = now; s_calm_ms = s_calm_n = s_calm_peak = 0;
+        s_calm_t0 = now; s_calm_ms = s_calm_n = s_calm_over = 0;
     }
     mutexUnlock(&s_lock);
 }
