@@ -32,7 +32,13 @@
 
 /* ---- pixel storage ----------------------------------------------------------------------------- */
 
-typedef struct { uint8_t *px; int refs; } Buf;
+typedef struct { uint8_t *px; int refs; size_t bytes; } Buf;
+#ifdef FH_V8
+/* V8 frees surfaces only when its GC runs: tell it how much C memory they hold so it collects them in time */
+#define EXT_MEM(d) JS_V8ExternalMemory(NULL, (int64_t)(d))
+#else
+#define EXT_MEM(d) ((void)0)
+#endif
 typedef struct { Buf *b; int w, h; int refs; } Surface;
 
 static JSClassID surface_class, ctx_class, grad_class;
@@ -41,10 +47,12 @@ static Buf *buf_new(size_t bytes) {
     Buf *b = malloc(sizeof *b);
     b->px = calloc(bytes ? bytes : 1, 1);
     b->refs = 1;
+    b->bytes = bytes;
+    EXT_MEM(bytes);
     return b;
 }
 static void buf_unref(Buf *b) {
-    if (b && --b->refs == 0) { free(b->px); free(b); }
+    if (b && --b->refs == 0) { EXT_MEM(-(int64_t)b->bytes); free(b->px); free(b); }
 }
 
 static Surface *surface_new(int w, int h) {
@@ -1908,6 +1916,8 @@ static JSValue nx_decode_image(JSContext *ctx, JSValueConst self, int argc, JSVa
     s->b = malloc(sizeof(Buf));
     s->b->px = px;
     s->b->refs = 1;
+    s->b->bytes = (size_t)w * h * 4;
+    EXT_MEM(s->b->bytes);
     s->w = w; s->h = h; s->refs = 1;
     JSValue so = JS_NewObjectClass(ctx, surface_class);
     JS_SetOpaque(so, s);

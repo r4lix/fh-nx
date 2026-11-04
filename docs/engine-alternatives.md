@@ -90,3 +90,35 @@ same digest on every map.
   pages. Its default size is arena minus 192 MB, capped at 512 MB (320 MB on a 512 MB arena). With arena minus 128 MB, `V8::Initialize`
   aborts, because V8 still maps memory outside the pool. Three runs at 1700 MHz on a 512 MB arena finished all six maps; the pool peaked
   at 201 MB and speed was unchanged. `--no-hz-pool` turns it off.
+
+## The V8 port of fh-nx (2026-11-04)
+
+`host/Makefile.v8` builds fh-nx with V8 instead of QuickJS (`make -f Makefile.v8` in host/, output `host/build_v8/fh-nx.nro`). It
+needs the switch-v8 15.0.243-9 package extracted at build/v8spike/pkg (local only, not in git; `V8PKG=` points elsewhere).
+
+- `host/v8/quickjs.h` + `qjs_v8.cc` implement the part of the QuickJS-ng C API the host uses on top of V8, so js_gl.c, js_canvas.c,
+  audio_mix.c, nx_common.c and the mods code compile unchanged. QuickJS ownership rules are kept: local handles inside native
+  callbacks, persistent handles outside them.
+- Same V8 setup as the bench (single-threaded, page pool on by default). `sdmc:/switch/fh-nx/v8flags.txt` adds V8 flags; pseudo-flags
+  `--no-hz-pool` and `--hz-threads=N`. Worker threads crash in abseil's CondVar on Horizon (upstream bug), so N must stay 0.
+- JIT only in application mode (launch through a game: hold R). An applet launch falls back to `--jitless` and logs it.
+- V8's full GC pauses for 140-280 ms. boot.js patch 11b runs one at each map start after a transfer (behind the black fade), so they
+  rarely come mid-map. Canvas pixel memory is reported to V8 (`JS_V8ExternalMemory`) so it collects surfaces in time.
+- `nx.engine` is "v8" or "quickjs". The 5-second `[host] v8:` log line shows heap, GC pauses, native-call time and the top native
+  functions.
+
+Device results (OLED, 1700 MHz, tools/device_run.ps1 with build/dev_survey_B.js, average tick in ms):
+
+| Map | QuickJS | V8 (first visit) | V8 (4th visit, JIT warm) |
+|---|---|---|---|
+| 80 Back_alleys | 17.1 | 12.4 | 11.2 |
+| 93 Level8_A | 12.6 | 8.5 | 7.3 |
+| 185 The_Void2 | 12.1 | 8.7 | 7.6 |
+| 74 Fortress | 7.7 | 5.0 | 4.5 |
+| 65 Level8_2_A | 12.5 | 8.7 | 7.5 |
+| 3 Level1_3_A | 11.8 | 8.1 | 7.8 |
+
+Battles (tests/bench_battle.js): 8.4/10.3/8.2/7.4 ms on QuickJS against 6.5/5.6/3.9/3.7 on V8. The gain is 1.5-1.7x on maps and up
+to 2x in battles, less than the 2.5x of the engine bench, because about 3-5 ms per frame is native C (the canvas rasteriser's
+fillRect, texture uploads, bufferSubData, draws), which costs the same with both engines. A 24-transfer soak run had no crash and
+stable memory (heap 58-77 MB after each map-start GC, canvas pixels 91-146 MB). Battles, the main menu and saving work.

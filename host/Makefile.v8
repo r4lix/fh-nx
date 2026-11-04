@@ -1,0 +1,48 @@
+# fh-nx host with V8 (switch-v8 15.0.243, full JIT) in place of QuickJS: make -f Makefile.v8
+# The bindings compile unchanged against v8/quickjs.h (the QuickJS API subset on V8, v8/qjs_v8.cc).
+# V8PKG: the extracted switch-v8 package (headers + libv8_monolith.a etc., see build/v8spike).
+DEVKITPRO ?= /opt/devkitpro
+V8PKG     ?= ../build/v8spike/pkg/opt/devkitpro/portlibs/switch
+PORTLIBS  := $(DEVKITPRO)/portlibs/switch
+CC        := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-gcc
+CXX       := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-g++
+ARCH      := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+B         := build_v8
+INC       := -Iv8 -I$(DEVKITPRO)/libnx/include -I$(PORTLIBS)/include -I../third_party/imgui -I../third_party/stb
+CFLAGS    := -O2 -g $(ARCH) -D__SWITCH__ -DFH_V8 $(INC) -D_GNU_SOURCE -Wall -Wno-unused-parameter -Wno-unused-function $(EXTRA_CFLAGS)
+LDFLAGS   := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -L$(DEVKITPRO)/libnx/lib -L$(PORTLIBS)/lib -L$(V8PKG)/lib
+
+$(B)/fh-nx.nro: $(B)/fh-nx.elf $(B)/fh-nx.nacp
+	$(DEVKITPRO)/tools/bin/elf2nro $< $@ --icon=icon.jpg --nacp=$(B)/fh-nx.nacp
+$(B)/fh-nx.nacp:
+	@mkdir -p $(B)
+	$(DEVKITPRO)/tools/bin/nacptool --create "Fear & Hunger" "Happy Paintings" "0.2.0-v8" $@
+
+$(B)/qjs_v8.o: v8/qjs_v8.cc v8/quickjs.h v8/hz_pool.h v8/hz_platform.inc
+	@mkdir -p $(B)
+	$(CXX) $(ARCH) -fno-rtti -fno-exceptions -std=c++20 -O2 -g -D__SWITCH__ -D_DEFAULT_SOURCE -Wall -Wno-unused-parameter \
+	    -Wno-deprecated-declarations -Iv8 -I$(DEVKITPRO)/libnx/include -I$(V8PKG)/include -c $< -o $@
+
+VORBIS_SRC := $(addprefix ../third_party/vorbis/lib/,mdct smallft block envelope window lsp lpc analysis synthesis psy info floor1 floor0 res0 mapping0 registry codebook sharedbook lookup bitrate vorbisfile)
+OGG_SRC    := ../third_party/ogg/src/bitwise ../third_party/ogg/src/framing
+AUDIO_INC  := -I../third_party/vorbis/include -I../third_party/vorbis/lib -I../third_party/ogg/include
+THIRD_OBJ  := $(addsuffix .o,$(addprefix $(B)/tp_,$(notdir $(VORBIS_SRC) $(OGG_SRC))))
+$(foreach f,$(VORBIS_SRC) $(OGG_SRC),$(eval $(B)/tp_$(notdir $(f)).o: $(f).c ; @mkdir -p $(B) ; $(CC) $(CFLAGS) $(AUDIO_INC) -w -c $$< -o $$@))
+
+$(B)/js_canvas.o: CFLAGS += -O3 -ffast-math
+$(B)/%.o: src/%.c src/js_gl.h src/js_canvas.h src/nx_common.h src/audio_mix.h src/audio_out.h src/cpu_boost.h src/gl_consts.inc v8/quickjs.h
+	@mkdir -p $(B)
+	$(CC) $(CFLAGS) $(AUDIO_INC) -c $< -o $@
+
+CXXFLAGS_HOST := -DFH_V8 -DIMGUI_DISABLE_DEBUG_TOOLS -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS -std=gnu++17 -O2 -g $(ARCH) -D__SWITCH__ $(INC) -w
+MODS_SRC := src/mods.cpp src/mods_menu.cpp ../src/vfs/Vfs.cpp ../src/vfs/ModManager.cpp ../src/core/Json.cpp ../src/menu/ModMenuModel.cpp ../src/menu/ControlsModel.cpp ../src/menu/SettingsModel.cpp ../src/menu/ModMenuUi.cpp ../third_party/imgui/imgui.cpp ../third_party/imgui/imgui_draw.cpp ../third_party/imgui/imgui_tables.cpp ../third_party/imgui/imgui_widgets.cpp
+MODS_OBJ := $(addprefix $(B)/mods_,$(addsuffix .o,$(notdir $(basename $(MODS_SRC)))))
+$(foreach f,$(MODS_SRC),$(eval $(B)/mods_$(notdir $(basename $(f))).o: $(f) src/mods.h src/mods_state.hpp src/mods_menu.h src/cpu_boost.h v8/quickjs.h ; @mkdir -p $(B) ; $(CXX) $(CXXFLAGS_HOST) -c $$< -o $$@))
+
+HOST_OBJ := $(addprefix $(B)/,main.o cpu_boost.o nx_common.o js_gl.o js_canvas.o audio_mix.o audio_out.o)
+$(B)/fh-nx.elf: $(HOST_OBJ) $(MODS_OBJ) $(THIRD_OBJ) $(B)/qjs_v8.o $(B)/fh-nx.nacp
+	$(CXX) $(HOST_OBJ) $(B)/qjs_v8.o $(THIRD_OBJ) $(MODS_OBJ) $(LDFLAGS) -Wl,-Map,$(B)/fh-nx.map \
+	    -Wl,--start-group -lv8_monolith -labsl -lchrome_zlib -lcompression_utils_portable -Wl,--end-group \
+	    -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm -o $@
+clean:
+	rm -rf $(B)

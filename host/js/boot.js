@@ -1066,6 +1066,17 @@
     } else nx.log("port patch: window background cache not installed (source differs)");
   }
 
+  // 11b. V8 build: its full garbage collections pause the game for ~170 ms when they come mid-map. A map scene that starts after
+  //      a transfer is still behind the black fade and the old map is garbage by then: collect there, so mid-map ones come
+  //      rarely. (QuickJS frees most memory at once through reference counts and needs none of this.)
+  if (nx.engine === "v8" && nx.gc) {
+    const SMp = g.Scene_Map.prototype, start = SMp.start;
+    SMp.start = function () {
+      if (this._transfer) nx.log("[gc] map start after transfer: full GC " + nx.gc().toFixed(0) + " ms");
+      return start.apply(this, arguments);
+    };
+  }
+
   // 12. Closing a menu or ending a battle rebuilds the whole map scene: the map JSON is parsed again (~25 ms on a PC) and a new
   //     Spriteset_Map creates ~420 character sprites, tilemap, lightmask and pictures (~45 ms), ~0.5 s on the
   //     Switch. When the map scene went to a menu scene (not a battle, not a transfer) and the same map comes back

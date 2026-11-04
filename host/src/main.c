@@ -177,6 +177,11 @@ static int run_session(void) {
     JS_SetPropertyStr(ctx, nx, "gc", JS_NewCFunction(ctx, nx_gc, "gc", 0));
     JS_SetPropertyStr(ctx, nx, "quit", JS_NewCFunction(ctx, nx_quit, "quit", 0));
     JS_SetPropertyStr(ctx, nx, "mem", JS_NewCFunction(ctx, nx_mem, "mem", 0));
+#ifdef FH_V8
+    JS_SetPropertyStr(ctx, nx, "engine", JS_NewString(ctx, "v8"));
+#else
+    JS_SetPropertyStr(ctx, nx, "engine", JS_NewString(ctx, "quickjs"));
+#endif
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, WIDTH));
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, HEIGHT));
     JS_SetPropertyStr(ctx, nx, "gl", js_gl_create(ctx, WIDTH, HEIGHT));
@@ -251,6 +256,9 @@ static int run_session(void) {
                 (unsigned long long)frames, frames / secs, (double)t_js * ms, (double)t_swap * ms, (double)gs.upload_ticks * ms,
                 gs.upload_n / 300.0, gs.upload_bytes / 300.0 / 1048576.0, (double)gs.draw_ticks * ms, gs.draw_n / 300.0,
                 (double)gs.buffer_ticks * ms, audio_out_played() / 48000.0);
+#ifdef FH_V8
+            say("[host] v8: %s\n", JS_V8Stats(rt));
+#endif
             t_js = 0; t_swap = 0; t0 = armGetSystemTick(); frames = 0;
         }
     }
