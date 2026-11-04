@@ -293,19 +293,28 @@ extern "C" int menu_overlay_on(void) {
     ModsState& s = mods_state();
     return g.ready && s.settings && s.settings->overlay();
 }
-extern "C" void menu_overlay(const char* text) {
+extern "C" void menu_overlay_ex(const char* text, int centred);
+extern "C" void menu_overlay(const char* text) { menu_overlay_ex(text, 0); }
+extern "C" void menu_overlay_ex(const char* text, int centred) {
     if (!g.ready || !text) return;
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kW, kH);
     io.DeltaTime = 1.f / 60.f;
     ImGui::NewFrame();
-    ImGui::SetNextWindowPos(ImVec2(8, 8));
-    ImGui::SetNextWindowBgAlpha(0.55f);
+    if (centred) {
+        ImGui::SetNextWindowPos(ImVec2(kW / 2, kH / 2), 0, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(kW - 120, kH - 120));
+        ImGui::SetNextWindowBgAlpha(0.9f);
+    } else {
+        ImGui::SetNextWindowPos(ImVec2(8, 8));
+        ImGui::SetNextWindowBgAlpha(0.55f);
+    }
     ImGui::Begin("##overlay", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings);
-    ImGui::SetWindowFontScale(0.72f);
-    ImGui::TextUnformatted(text);
+    ImGui::SetWindowFontScale(centred ? 1.0f : 0.72f);
+    if (centred) { ImGui::PushTextWrapPos(kW - 160); ImGui::TextUnformatted(text); ImGui::PopTextWrapPos(); }
+    else ImGui::TextUnformatted(text);
     ImGui::End();
     ImGui::Render();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

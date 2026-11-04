@@ -162,7 +162,9 @@ JSValue JS_NewTypedArray(JSContext *ctx, int argc, JSValueConst *argv, JSTypedAr
 
 /* V8-only extras (no QuickJS equivalent) */
 void JS_V8ExternalMemory(JSContext *ctx, int64_t delta_bytes);   /* tell the GC about C memory owned by JS objects */
-const char *JS_V8Stats(JSRuntime *rt);                           /* one line: heap, GC counts and pause times */
+const char *JS_V8Stats(JSRuntime *rt);
+void JS_V8InterruptStuck(void);    /* any thread: log the JS stack and stop the running script (watchdog) */
+void JS_V8ClearTerminate(void);    /* JS thread, after a call returned: allow JS again after a watchdog stop */                           /* one line: heap, GC counts and pause times */
 
 #ifdef __cplusplus
 }

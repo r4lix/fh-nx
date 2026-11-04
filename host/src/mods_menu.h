@@ -30,6 +30,7 @@ void menu_reset_focus(void);
 /* Performance overlay (System tab): whether it is on, and drawing it over the frame just rendered (before the swap). */
 int menu_overlay_on(void);
 void menu_overlay(const char *text);
+void menu_overlay_ex(const char *text, int centred);   /* centred: a large box in the middle (the error screen) */
 void menu_set_debug_state(const char *text);
 const char *menu_debug_commands(void);
 /* Reset the screen state the menu changed so the game's own GL layer can carry on. */

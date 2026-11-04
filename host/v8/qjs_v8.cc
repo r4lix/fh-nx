@@ -790,3 +790,24 @@ extern "C" JSValue JS_NewTypedArray(JSContext* ctx, int argc, JSValueConst* argv
 
 // js_alloc.h: QuickJS's pool allocator has no use under V8
 extern "C" const JSMallocFunctions* js_fast_malloc_functions(void) { return nullptr; }
+
+// ---- watchdog: a JS call that does not return (an endless loop in game code) ---------------------------------------------
+// Called from another thread. The interrupt runs on the JS thread at its next check: it logs the JS stack (where the loop is),
+// then execution is terminated, so the call returns with an exception and the game goes on instead of freezing the console.
+static void stuck_interrupt(v8::Isolate* iso, void*) {
+  v8::HandleScope hs(iso);
+  v8::Local<v8::StackTrace> st = v8::StackTrace::CurrentStackTrace(iso, 12);
+  fh_log("watchdog: JS stuck for 10 s, stack:\n");
+  for (int i = 0; i < st->GetFrameCount(); i++) {
+    v8::Local<v8::StackFrame> f = st->GetFrame(iso, i);
+    v8::String::Utf8Value fn(iso, f->GetFunctionName()), sc(iso, f->GetScriptName());
+    fh_log("    at %s (%s:%d:%d)\n", *fn && **fn ? *fn : "<anonymous>", *sc ? *sc : "?", f->GetLineNumber(), f->GetColumn());
+  }
+  iso->TerminateExecution();
+}
+extern "C" void JS_V8InterruptStuck(void) {
+  if (g_iso) g_iso->RequestInterrupt(stuck_interrupt, nullptr);
+}
+extern "C" void JS_V8ClearTerminate(void) {
+  if (g_iso && g_iso->IsExecutionTerminating()) g_iso->CancelTerminateExecution();
+}

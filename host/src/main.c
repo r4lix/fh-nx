@@ -35,7 +35,8 @@ static volatile int g_stick[4];
 static volatile int g_touch, g_touch_x, g_touch_y;       /* touch screen, 1280x720 pixels */
 static volatile int g_menu_req;                          /* set by the main thread: hold - for 2 s */
 static volatile int g_mute;                              /* frames of pad input hidden from the game after the menu closes */
-static volatile int g_relaunch;                          /* Apply: start this NRO again so the mods take effect */
+static volatile int g_relaunch;
+static volatile u64 g_js_since;                         /* tick count when the current frame's JS started, 0 outside JS */                          /* Apply: start this NRO again so the mods take effect */
 static char g_nro[512];
 
 static void say(const char *fmt, ...) {
@@ -122,6 +123,17 @@ static volatile int g_restart_req;
 static int g_session;
 static JSValue nx_restart(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     g_restart_req = 1;
+    return JS_UNDEFINED;
+}
+
+/* nx.showError(text): MV stopped on an error (Graphics.printError). Without a browser nothing would show it and the game would
+ * just freeze: the host draws it in a box over the last frame, and + quits. */
+static char g_err[900];
+static JSValue nx_show_error(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    const char *s = argc ? JS_ToCString(ctx, argv[0]) : NULL;
+    if (s && !s[0]) g_err[0] = 0;                    /* "" takes the box away (scripted tests that go on) */
+    else if (s) snprintf(g_err, sizeof g_err, "The game stopped because of an error.\n\n%.600s\n\nPress + to quit. log.txt in sdmc:/switch/fh-nx has the details.", s);
+    if (s) JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
 
@@ -264,6 +276,8 @@ static int run_session(void) {
     JS_SetPropertyStr(ctx, nx, "gc", JS_NewCFunction(ctx, nx_gc, "gc", 0));
     JS_SetPropertyStr(ctx, nx, "quit", JS_NewCFunction(ctx, nx_quit, "quit", 0));
     JS_SetPropertyStr(ctx, nx, "restart", JS_NewCFunction(ctx, nx_restart, "restart", 0));
+    JS_SetPropertyStr(ctx, nx, "showError", JS_NewCFunction(ctx, nx_show_error, "showError", 1));
+    g_err[0] = 0;
     JS_SetPropertyStr(ctx, nx, "session", JS_NewInt32(ctx, ++g_session));
     JS_SetPropertyStr(ctx, nx, "mem", JS_NewCFunction(ctx, nx_mem, "mem", 0));
 #ifdef FH_V8
@@ -322,7 +336,12 @@ static int run_session(void) {
         }
         if (g_mute > 0) g_mute--;
         JSValue arg = JS_NewFloat64(ctx, (double)armTicksToNs(a) / 1e6);
+        g_js_since = armGetSystemTick();
         JSValue r = JS_Call(ctx, tick, JS_UNDEFINED, 1, &arg);
+        g_js_since = 0;
+#ifdef FH_V8
+        JS_V8ClearTerminate();                                   /* after a watchdog stop: the next frame may run JS again */
+#endif
         JS_FreeValue(ctx, arg);
         if (JS_IsException(r)) {
             nx_dump_exception(ctx);
@@ -336,7 +355,12 @@ static int run_session(void) {
         if (snap_now) { menu_snapshot(); debug_menu_open(ctx, g); menu_open = 1; menu_reset_focus(); }
         u64 js_end = armGetSystemTick();
         cpu_boost_frame((double)(js_end - a) * 1000.0 / armGetSystemTickFreq());   /* Auto clock: steps on the game's work time */
-        if (!snap_now && menu_overlay_on()) {
+        if (g_err[0] && menu_ok) {
+            menu_overlay_ex(g_err, 1);
+            JSValue f = JS_GetPropertyStr(ctx, g, "__overlayDrawn");
+            if (JS_IsFunction(ctx, f)) { JSValue rr = JS_Call(ctx, f, JS_UNDEFINED, 0, NULL); JS_FreeValue(ctx, rr); }
+            JS_FreeValue(ctx, f);
+        } else if (!snap_now && menu_overlay_on()) {
             overlay_update(&ov, ctx, g, rt);
             menu_overlay(ov.text);
             JSValue f = JS_GetPropertyStr(ctx, g, "__overlayDrawn");    /* the overlay changed GL state behind the game's renderer */
@@ -404,6 +428,7 @@ int main(int argc, char **argv) {
     hidInitializeTouchScreen();
     cpu_boost_init(cpu_boost_read_setting(BASE "/settings.ini"));   /* before loading: boot and map loads gain too */
     u64 minus_since = 0;
+    u64 stuck_seen = 0;                                                  /* watchdog: the JS frame it already reported */
 
     Thread th;
     if (R_FAILED(threadCreate(&th, worker, NULL, NULL, 16u << 20, 0x2C, -2))) {
@@ -425,9 +450,28 @@ int main(int argc, char **argv) {
             if (!minus_since) minus_since = now;
             else if (now - minus_since > 2 * armGetSystemTickFreq()) { g_menu_req = 1; minus_since = 0; }
         } else minus_since = 0;
+        if (g_err[0] && (padGetButtonsDown(&pad) & HidNpadButton_Plus)) g_quit = 1;   /* the error box: + quits */
 #ifdef FH_DEV_QUIT
         if (padGetButtonsDown(&pad) & HidNpadButton_Plus) g_quit = 1;       /* dev builds only: + quits (tools/dev_*.sh rely on it) */
 #endif
+        /* watchdog: one frame of game JS running for 10 s is an endless loop. V8 logs the JS stack and stops that script, so the
+         * game goes on; 20 s means it is stuck in native code (logged, nothing more can be done from here). */
+        u64 js0 = g_js_since;
+        if (js0 && js0 != stuck_seen) {
+            u64 el = armGetSystemTick() - js0, f = armGetSystemTickFreq();
+            if (el > 10 * f) {
+#ifdef FH_V8
+                say("watchdog: a frame of game code has run for 10 s, stopping it\n");
+                JS_V8InterruptStuck();
+#else
+                say("watchdog: a frame of game code has run for 10 s\n");
+#endif
+                stuck_seen = js0;
+            }
+        } else if (js0 && js0 == stuck_seen && armGetSystemTick() - js0 > 20 * armGetSystemTickFreq()) {
+            say("watchdog: still stuck after 20 s (native code, not JS)\n");
+            stuck_seen = ~0ULL;
+        }
         svcSleepThread(4000000ULL);
     }
     g_quit = 1;

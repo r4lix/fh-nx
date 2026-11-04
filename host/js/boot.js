@@ -33,8 +33,8 @@
     if (m.plugins.length || m.overrides.length) nx.log("mods: " + m.plugins.length + " plugin(s) added, " + m.overrides.length + " parameter override(s)");
   }
 
-  // MV's error printer builds DOM; send it to the log instead
-  g.Graphics.printError = (name, message) => nx.log("MV ERROR: " + name + ": " + message);
+  // MV's error printer builds DOM: log it and have the host show it over the frozen frame (+ quits there)
+  g.Graphics.printError = (name, message) => { nx.log("MV ERROR: " + name + ": " + message); if (nx.showError) nx.showError(name + ": " + message); };
   g.Graphics.printLoadingError = (url) => nx.log("MV LOADING ERROR: " + url);
 
   // Port patch: Bitmap.adjustTone is a per-pixel JavaScript loop over getImageData (every window refresh pays
