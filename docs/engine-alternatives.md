@@ -122,3 +122,17 @@ Battles (tests/bench_battle.js): 8.4/10.3/8.2/7.4 ms on QuickJS against 6.5/5.6/
 to 2x in battles, less than the 2.5x of the engine bench, because about 3-5 ms per frame is native C (the canvas rasteriser's
 fillRect, texture uploads, bufferSubData, draws), which costs the same with both engines. A 24-transfer soak run had no crash and
 stable memory (heap 58-77 MB after each map-start GC, canvas pixels 91-146 MB). Battles, the main menu and saving work.
+
+### Device test round (OLED, 2026-11-04, tests/device)
+
+- Map sweep: 150 of 168 maps without any error. The other 18: 14 not reached because the previous map's cutscene held the player
+  (test artefact), 3 battles started by map events, 1 map event that goes to the title.
+- Troop sweep: all 196 used troops battle without errors (4.0 ms average tick, 14.4 ms worst). Troop 173 is an unused placeholder
+  whose enemy has no image: MV stops on it with any engine.
+- 12 min on Back_alleys: 60 fps (16.8 ms frames), no errors, stable memory; the long frames are door transfers (loading + the
+  map-start GC); 5-12 frames over 33 ms per 30 s.
+- 20 game restarts in a row, then normal play. The intro movie plays to the end.
+- Found and fixed on the way: the isolate is now kept across restarts (a 3rd restart aborted V8), font registration reuses its
+  slot (the 17th restart waited forever for its font, both engines), MV errors show a box with "+ quits" instead of a silent
+  freeze, a 10 s JS watchdog, and the app no longer waits forever for a hung game thread at exit.
+- Not tested: launching from the album (applet mode: V8 falls back to jitless and has far less memory), and the Switch Lite.
