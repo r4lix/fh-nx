@@ -372,13 +372,17 @@ static int run_session(void) {
         }
     }
 
+    say("session end: audio\n");
     audio_out_stop();
     audio_shutdown();
+    say("session end: JS runtime\n");
     JS_FreeValue(ctx, tick);
     JS_FreeValue(ctx, g);
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
+    say("session end: GL\n");
     js_gl_release_all();
+    say("session end: done\n");
     return restart;
 }
 
@@ -427,8 +431,10 @@ int main(int argc, char **argv) {
         svcSleepThread(4000000ULL);
     }
     g_quit = 1;
-    threadWaitForExit(&th);
-    threadClose(&th);
+    /* The game thread ends its session (audio, JS runtime, GL) and returns. Should it hang there, the app must still exit: a main
+     * thread blocked here stops servicing the applet, and the console then ignores HOME until it is power-cycled. */
+    if (R_FAILED(waitSingleHandle(th.handle, 8000000000ULL))) say("exit: game thread did not end within 8 s, leaving without it\n");
+    else threadClose(&th);
     cpu_boost_exit();
     if (g_log) fclose(g_log);
     return 0;
