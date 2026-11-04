@@ -14,11 +14,13 @@ const std::vector<SettingsModel::CpuOption>& SettingsModel::cpuOptions() {
 void SettingsModel::load() {
     cpuMhz_ = kDefaultCpuMhz;
     widescreen_ = false;
+    overlay_ = false;
     std::ifstream f(ini_);
     std::string line;
     while (std::getline(f, line)) {
         if (line.rfind("cpu_mhz=", 0) == 0) cpuMhz_ = std::max(0, std::atoi(line.c_str() + 8));
         else if (line.rfind("widescreen=", 0) == 0) widescreen_ = std::atoi(line.c_str() + 11) != 0;
+        else if (line.rfind("overlay=", 0) == 0) overlay_ = std::atoi(line.c_str() + 8) != 0;
     }
 }
 
@@ -31,6 +33,8 @@ bool SettingsModel::save() const {
         f << "cpu_mhz=" << cpuMhz_ << "\n";
         f << "# 1: 16:9 game area (1110x624), read when the game starts\n";
         f << "widescreen=" << (widescreen_ ? 1 : 0) << "\n";
+        f << "# 1: performance overlay (fps, frame times, memory, map)\n";
+        f << "overlay=" << (overlay_ ? 1 : 0) << "\n";
         if (!f) return false;
     }
     std::remove(ini_.c_str());                     // FAT: rename does not replace
@@ -49,5 +53,10 @@ void SettingsModel::cycleCpu(int dir) {
 
 void SettingsModel::toggleWidescreen() {
     widescreen_ = !widescreen_;
+    save();
+}
+
+void SettingsModel::toggleOverlay() {
+    overlay_ = !overlay_;
     save();
 }

@@ -22,8 +22,13 @@ public:
     bool widescreen() const { return widescreen_; }
     void toggleWidescreen();
 
+    // Performance overlay over the game (fps, frame times, memory, map). Applied at once.
+    bool overlay() const { return overlay_; }
+    void toggleOverlay();
+
 private:
     std::string ini_;
     int cpuMhz_ = kDefaultCpuMhz;
     bool widescreen_ = false;
+    bool overlay_ = false;
 };

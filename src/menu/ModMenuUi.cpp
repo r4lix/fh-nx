@@ -226,6 +226,13 @@ void ModMenuUi::tabSystem() {
     ImGui::TextWrapped("Shows more of the map left and right, without black bars. Takes effect the next time the game starts. "
                        "Pictures and title screens stay centred at their original size.");
     ImGui::PopStyleColor();
+    ImGui::Spacing();
+    bool ov = settings_->overlay();
+    if (ImGui::Checkbox("Performance overlay", &ov)) settings_->toggleOverlay();
+    ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+    ImGui::TextWrapped("Frames per second, time per frame (game code, waiting for the screen), memory, CPU clock and where you "
+                       "are, in the top-left corner.");
+    ImGui::PopStyleColor();
 }
 
 void ModMenuUi::tabPlugins() {

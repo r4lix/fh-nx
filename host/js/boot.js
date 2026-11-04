@@ -1352,6 +1352,25 @@
   g.window.onload();                                  // SceneManager.run(Scene_Boot)
   step("SceneManager.run");
   // the native mods menu took over the screen and changed GL state behind PIXI's back: resync its caches
+  // Performance overlay (minus menu > System): the game's line of it, and a renderer reset after the host drew it over the frame.
+  g.__overlayLine = function () {
+    const sc = g.SceneManager._scene ? g.SceneManager._scene.constructor.name.replace(/^Scene_/, "") : "-";
+    let s = sc;
+    if (g.$gameMap && g.$gameMap.mapId() > 0 && g.$dataMapInfos) {
+      const info = g.$dataMapInfos[g.$gameMap.mapId()];
+      s += "   map " + g.$gameMap.mapId() + " " + (info ? info.name : "") + "   x " + g.$gamePlayer.x + " y " + g.$gamePlayer.y +
+        "   events " + g.$gameMap.events().length;
+    }
+    const d = g.$gameSystem && g.$gameSystem._fhDebug;
+    if (d) {
+      const on = [];
+      if (d.noclip) on.push("noclip"); if (d.god) on.push("god"); if (d.speed && d.speed !== 4) on.push("speed " + d.speed);
+      if (d.lightLock) on.push("light " + d.light); if (d.fullBright) on.push("no darkness");
+      if (on.length) s += "\ncheats: " + on.join(", ");
+    }
+    return s;
+  };
+  g.__overlayDrawn = function () { try { g.Graphics._renderer.reset(); } catch (e) {} };
   g.__menuClosed = function () { try { g.__applyControls(); g.Graphics._renderer.reset(); } catch (e) { nx.log("menuClosed: " + e); } };
   try { __loadScript("js/dev_extra.js"); nx.log("dev_extra.js loaded"); } catch (e) { /* optional device-side probe script */ }
 

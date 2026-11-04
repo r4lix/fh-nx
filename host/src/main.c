@@ -203,6 +203,37 @@ static void debug_menu_close(JSContext *ctx, JSValueConst g) {
     JS_FreeValue(ctx, f);
 }
 
+/* ---- performance overlay (System tab) ------------------------------------------------------------ */
+
+typedef struct { u64 t0, frames, js, swap, worst, prev_end; char text[512]; } Overlay;
+
+/* Once a second: the text shown in the corner. boot.js __overlayLine adds the scene and map. */
+static void overlay_update(Overlay *o, JSContext *ctx, JSValueConst g, JSRuntime *rt) {
+    u64 now = armGetSystemTick(), f = armGetSystemTickFreq();
+    if (o->t0 && now - o->t0 < f) return;
+    double secs = o->t0 ? (double)(now - o->t0) / f : 1, ms = 1000.0 / f, n = o->frames ? (double)o->frames : 1;
+    JSMemoryUsage u;
+    JS_ComputeMemoryUsage(rt, &u);
+    const char *line = NULL;
+    JSValue fn = JS_GetPropertyStr(ctx, g, "__overlayLine"), r = JS_UNDEFINED;
+    if (JS_IsFunction(ctx, fn)) {
+        r = JS_Call(ctx, fn, JS_UNDEFINED, 0, NULL);
+        if (JS_IsString(r)) line = JS_ToCString(ctx, r);
+    }
+#ifdef FH_V8
+    const char *eng = "V8";
+#else
+    const char *eng = "QuickJS";
+#endif
+    snprintf(o->text, sizeof o->text, "%.0f fps   worst frame %.1f ms\ngame %.1f ms   screen wait %.1f ms\n%s   heap %.0f MB%s%s",
+             o->t0 ? o->frames / secs : 0.0, (double)o->worst * ms, (double)o->js * ms / n, (double)o->swap * ms / n, eng,
+             u.malloc_size / 1048576.0, line ? "\n" : "", line ? line : "");
+    if (line) JS_FreeCString(ctx, line);
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, fn);
+    o->t0 = now; o->frames = o->js = o->swap = o->worst = 0;
+}
+
 /* ---- worker ------------------------------------------------------------------------------------- */
 
 /* One run of the game: a fresh QuickJS runtime booting MV. Returns 1 when the mods menu asked for a restart (Apply),
@@ -248,6 +279,7 @@ static int run_session(void) {
     int errors = 0;
     u64 frames = 0, t_js = 0, t_swap = 0;
     u64 t0 = armGetSystemTick();
+    Overlay ov = {0};
     int menu_ok = menu_init(BASE "/www/fonts/Eczar-Regular.ttf", "Fear & Hunger"), menu_open = 0;
     say("mods menu: %s\n", menu_ok ? "ready (hold - for 2 s)" : "unavailable");
 
@@ -288,9 +320,23 @@ static int run_session(void) {
         t_js += armGetSystemTick() - a;
 
         if (snap_now) { menu_snapshot(); debug_menu_open(ctx, g); menu_open = 1; menu_reset_focus(); }
+        u64 js_end = armGetSystemTick();
+        if (!snap_now && menu_overlay_on()) {
+            overlay_update(&ov, ctx, g, rt);
+            menu_overlay(ov.text);
+            JSValue f = JS_GetPropertyStr(ctx, g, "__overlayDrawn");    /* the overlay changed GL state behind the game's renderer */
+            if (JS_IsFunction(ctx, f)) { JSValue rr = JS_Call(ctx, f, JS_UNDEFINED, 0, NULL); JS_FreeValue(ctx, rr); }
+            JS_FreeValue(ctx, f);
+        } else ov.t0 = 0;
         u64 sw0 = armGetSystemTick();
         eglSwapBuffers(s_display, s_surface);
-        t_swap += armGetSystemTick() - sw0;
+        u64 sw1 = armGetSystemTick();
+        t_swap += sw1 - sw0;
+        ov.frames++;
+        ov.js += js_end - a;
+        ov.swap += sw1 - sw0;
+        if (ov.prev_end && sw1 - ov.prev_end > ov.worst) ov.worst = sw1 - ov.prev_end;
+        ov.prev_end = sw1;
         /* A swap with nothing new drawn returns at once (MV skips frames), which would spin the loop at
          * 120 ticks/s. The game logic is a fixed 60 Hz, so never tick faster than that. */
         u64 spent = armGetSystemTick() - a, budget = armGetSystemTickFreq() / 60;

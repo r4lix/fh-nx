@@ -286,3 +286,30 @@ extern "C" const char* menu_debug_commands(void) {
     g.debugCmds = g.debug.available() ? g.debug.commands() : std::string();
     return g.debugCmds.c_str();
 }
+
+/* Performance overlay: one small ImGui window drawn over the game's finished frame (before the swap). The game's GL state is
+ * changed by it: the caller tells the game to reset its renderer (boot.js __overlayDrawn). */
+extern "C" int menu_overlay_on(void) {
+    ModsState& s = mods_state();
+    return g.ready && s.settings && s.settings->overlay();
+}
+extern "C" void menu_overlay(const char* text) {
+    if (!g.ready || !text) return;
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(kW, kH);
+    io.DeltaTime = 1.f / 60.f;
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos(ImVec2(8, 8));
+    ImGui::SetNextWindowBgAlpha(0.55f);
+    ImGui::Begin("##overlay", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::SetWindowFontScale(0.72f);
+    ImGui::TextUnformatted(text);
+    ImGui::End();
+    ImGui::Render();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, (GLsizei)kW, (GLsizei)kH);
+    render(ImGui::GetDrawData());
+    menu_release_gl();
+}
