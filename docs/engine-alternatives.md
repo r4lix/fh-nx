@@ -135,4 +135,4 @@ stable memory (heap 58-77 MB after each map-start GC, canvas pixels 91-146 MB). 
 - Found and fixed on the way: the isolate is now kept across restarts (a 3rd restart aborted V8), font registration reuses its
   slot (the 17th restart waited forever for its font, both engines), MV errors show a box with "+ quits" instead of a silent
   freeze, a 10 s JS watchdog, and the app no longer waits forever for a hung game thread at exit.
-- Not tested: launching from the album (applet mode: V8 falls back to jitless and has far less memory), and the Switch Lite.
+- Launching from the album (applet mode) is not supported by the V8 build: it shows a message asking for a full memory launch (hold R on a game) and + quits, without starting V8 (sdmc:/switch/fh-nx/force_applet simulates it). The Switch Lite is not tested.

@@ -312,8 +312,8 @@ extern "C" void menu_overlay_ex(const char* text, int centred) {
     ImGui::Begin("##overlay", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings);
-    ImGui::SetWindowFontScale(centred ? 1.0f : 0.72f);
-    if (centred) { ImGui::PushTextWrapPos(kW - 160); ImGui::TextUnformatted(text); ImGui::PopTextWrapPos(); }
+    ImGui::SetWindowFontScale(centred ? 1.4f : 0.72f);
+    if (centred) { ImGui::PushTextWrapPos(820.f); ImGui::TextUnformatted(text); ImGui::PopTextWrapPos(); }
     else ImGui::TextUnformatted(text);
     ImGui::End();
     ImGui::Render();

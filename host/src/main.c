@@ -260,6 +260,34 @@ static void overlay_update(Overlay *o, JSContext *ctx, JSValueConst g, JSRuntime
 
 /* One run of the game: a fresh QuickJS runtime booting MV. Returns 1 when the mods menu asked for a restart (Apply),
  * so the same process starts the game again with the new mod set; 0 when the app should exit. */
+#ifdef FH_V8
+/* Launched from the album (applet mode): the V8 build is meant for full memory mode (launch through a game, holding R), where it
+ * has its JIT and ~3 GB. In applet mode it would have no JIT and far too little memory for the game, so it says so instead of
+ * starting. + quits (the main thread's error-box check). */
+static int applet_mode(void) {
+    FILE *force = fopen(BASE "/force_applet", "r");      /* testing: behave as if launched from the album */
+    if (force) { fclose(force); return 1; }
+    AppletType t = appletGetAppletType();
+    return t != AppletType_Application && t != AppletType_SystemApplication;
+}
+static void applet_screen(void) {
+    say("applet mode (type %d): asking for a full memory launch\n", (int)appletGetAppletType());
+    mods_init(BASE "/www", BASE "/mods", BASE "/mods.ini");
+    if (!menu_init(BASE "/www/fonts/Eczar-Regular.ttf", "Fear & Hunger")) return;
+    snprintf(g_err, sizeof g_err,
+             "Fear & Hunger needs full memory mode.\n\nIt was started from the album, where the game does not have enough memory "
+             "to run. Close it, then hold R while starting any game: the homebrew menu opens in full memory mode, and Fear & "
+             "Hunger runs at full speed from there.\n\nPress + to quit.");
+    while (!g_quit) {
+        glClearColor(0.f, 0.f, 0.f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        menu_overlay_ex(g_err, 1);
+        eglSwapBuffers(s_display, s_surface);
+        svcSleepThread(16000000ULL);
+    }
+}
+#endif
+
 static int run_session(void) {
     int restart = 0;
     JSRuntime *rt = JS_NewRuntime2(js_fast_malloc_functions(), NULL);       /* pool allocator: see js_alloc.h */
@@ -413,6 +441,9 @@ static int run_session(void) {
 static void worker(void *arg) {
     (void)arg;
     if (!egl_start()) { g_quit = 1; return; }
+#ifdef FH_V8
+    if (applet_mode()) { applet_screen(); egl_stop(); g_quit = 1; return; }
+#endif
     while (!g_quit && run_session()) say("restarting the game with the new mod set\n");
     egl_stop();
     g_quit = 1;
