@@ -86,3 +86,7 @@ same digest on every map.
 - Memory risk: the switch-v8 backend never gives pages back (munmap is a no-op), and the data arena it reserves varies from run to run
   (512 MB or 1024 MB). One 1700 MHz run got 512 MB and hit a fatal OOM on the 6th map after about 30 s of play. A port would need a
   reusing page allocator (the --hz-pool experiment) or a backend that releases memory.
+- Fix (v8-bench, now the default): V8's data pages come from the bench's own page pool (`hz_pool.h`, `--hz-pool`), which reuses freed
+  pages. Its default size is arena minus 192 MB, capped at 512 MB (320 MB on a 512 MB arena). With arena minus 128 MB, `V8::Initialize`
+  aborts, because V8 still maps memory outside the pool. Three runs at 1700 MHz on a 512 MB arena finished all six maps; the pool peaked
+  at 201 MB and speed was unchanged. `--no-hz-pool` turns it off.
