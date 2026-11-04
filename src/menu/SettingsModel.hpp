@@ -18,7 +18,12 @@ public:
     void cycleCpu(int dir);                                // next/previous option, saves, calls onChange
     std::function<void(int mhz)> onCpuChange;
 
+    // 16:9 game area (1110x624 instead of 816x624). The resolution is set when the game boots: takes effect at the next start.
+    bool widescreen() const { return widescreen_; }
+    void toggleWidescreen();
+
 private:
     std::string ini_;
     int cpuMhz_ = kDefaultCpuMhz;
+    bool widescreen_ = false;
 };

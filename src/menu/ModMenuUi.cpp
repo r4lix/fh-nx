@@ -218,6 +218,14 @@ void ModMenuUi::tabSystem() {
                        "a higher clock gives more frames per second on busy maps. The console's own clock comes back in the HOME menu "
                        "and when the game exits. A clock manager (Horizon OC / sys-clk profile for this title) overrides this setting.");
     ImGui::PopStyleColor();
+    ImGui::Spacing();
+    if (ImGui::Button(settings_->widescreen() ? "Widescreen:  16:9" : "Widescreen:  off (original 4:3)",
+                      ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+        settings_->toggleWidescreen();
+    ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+    ImGui::TextWrapped("Shows more of the map left and right, without black bars. Takes effect the next time the game starts. "
+                       "Pictures and title screens stay centred at their original size.");
+    ImGui::PopStyleColor();
 }
 
 void ModMenuUi::tabPlugins() {

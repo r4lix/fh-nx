@@ -102,6 +102,29 @@
     };
   }
 
+  // Widescreen (minus menu > System, settings.ini widescreen=1): a 16:9 game area, 1110x624 instead of 816x624, so the
+  // 1280x720 screen has no black bars and the map shows ~3 more tiles on each side. MV already centres maps narrower than the
+  // screen and the title background; what the game placed for 816 pixels (pictures, the game-over image, enemies in battle)
+  // moves right by half the extra width. TerraxLighting's darkness layer is sized from its own parameter: made wider too.
+  if (nx.widescreen) {
+    const W = 1110, OX = (W - 816) / 2;
+    const param = (plugin, key, v) => { const p = g.$plugins.find((x) => x.name === plugin); if (p) p.parameters[key] = String(v); };
+    param("Community_Basic", "screenWidth", W);
+    param("TerraxLighting", "Screensize X", W + 50);
+    g.SceneManager._screenWidth = g.SceneManager._boxWidth = W;      // in case no plugin sets it
+    const pics = g.Spriteset_Base.prototype.createPictures;
+    g.Spriteset_Base.prototype.createPictures = function () { pics.apply(this, arguments); if (this._pictureContainer) this._pictureContainer.x += OX; };
+    const ex = g.Game_Enemy.prototype.screenX;
+    g.Game_Enemy.prototype.screenX = function () { return ex.call(this) + OX; };
+    const go = g.Scene_Gameover.prototype.createBackground;
+    g.Scene_Gameover.prototype.createBackground = function () {
+      go.apply(this, arguments);
+      const sp = this._backSprite;
+      if (sp && sp.bitmap) sp.bitmap.addLoadListener(() => { if (sp.bitmap.width < g.Graphics.width) sp.x = Math.floor((g.Graphics.width - sp.bitmap.width) / 2); });
+    };
+    nx.log("widescreen: " + W + "x624");
+  }
+
   // Port patches: plugins that work around browser limits the native host does not have.
   //  - DSE-AudioLagFix streams BGM through HTML5 <audio> elements; the native mixer already streams from
   //    compressed data, so the stock WebAudio path is used instead.

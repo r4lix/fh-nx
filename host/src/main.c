@@ -140,6 +140,18 @@ static JSValue nx_mem(JSContext *ctx, JSValueConst self, int argc, JSValueConst 
     return a;
 }
 
+/* settings.ini "widescreen=1": the game boots at 1110x624 (boot.js reads nx.widescreen) */
+static int read_widescreen(void) {
+    FILE *f = fopen(BASE "/settings.ini", "r");
+    if (!f) return 0;
+    char line[128];
+    int on = 0;
+    while (fgets(line, sizeof line, f))
+        if (strncmp(line, "widescreen=", 11) == 0) on = atoi(line + 11) != 0;
+    fclose(f);
+    return on;
+}
+
 static int run_file(JSContext *ctx, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) { say("missing %s\n", path); return 0; }
@@ -216,6 +228,7 @@ static int run_session(void) {
 #else
     JS_SetPropertyStr(ctx, nx, "engine", JS_NewString(ctx, "quickjs"));
 #endif
+    JS_SetPropertyStr(ctx, nx, "widescreen", JS_NewBool(ctx, read_widescreen()));
     JS_SetPropertyStr(ctx, nx, "width", JS_NewInt32(ctx, WIDTH));
     JS_SetPropertyStr(ctx, nx, "height", JS_NewInt32(ctx, HEIGHT));
     JS_SetPropertyStr(ctx, nx, "gl", js_gl_create(ctx, WIDTH, HEIGHT));
