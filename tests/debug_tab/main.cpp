@@ -22,7 +22,8 @@ int main() {
     for (int i = 1; i <= 300; i++) st += std::string("item ") + "iwa"[i % 3] + " " + std::to_string(i) + " 0 Thing " + std::to_string(i) + "\n";
     dbg.setState(st);
     ModMenuUi ui(model, &controls, &settings, &dbg);
-    const char* seq[] = {"R", "R", "R", "Down", "A", "Up", "Right", "A", "Down", "Down", "Down", "A", "Right", "A", "Down", "A", "X", "Left", "Left", "A"};
+    // A three times on one checkbox must keep it focused (on, off, on); Left/Right move a slider without leaving it
+    const char* seq[] = {"R", "R", "R", "Down", "A", "A", "A", "Down", "Down", "Right", "Right", "Down", "Right", "Right", "Left"};
     auto key = [](const std::string& k) {
         if (k == "A") return ImGuiKey_GamepadFaceDown; if (k == "X") return ImGuiKey_GamepadFaceLeft;
         if (k == "Up") return ImGuiKey_GamepadDpadUp; if (k == "Down") return ImGuiKey_GamepadDpadDown;
@@ -45,6 +46,9 @@ int main() {
         else { io.AddKeyEvent(key(k), true); frame(); io.AddKeyEvent(key(k), false); }
         for (int i = 0; i < 8; i++) frame();
     }
-    std::printf("commands:\n%s", dbg.commands().c_str());
-    return 0;
+    std::string c = dbg.commands();
+    std::printf("commands:\n%s", c.c_str());
+    bool ok = c.find("noclip 1") != std::string::npos && c.find("speed 6") != std::string::npos && c.find("light 250") != std::string::npos;
+    std::printf("%s\n", ok ? "PASS" : "FAIL (want noclip 1, speed 6, light 250)");
+    return ok ? 0 : 1;
 }

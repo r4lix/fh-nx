@@ -123,7 +123,7 @@ void ModMenuUi::tabMods() {
     if (selected_ >= rows.size()) selected_ = rows.size() - 1;
 
     static const char* sortNames[] = {"Load order", "Name", "Enabled first", "Author", "Tested first"};
-    if (ImGui::Button((std::string("Sort: ") + sortNames[sort_]).c_str())) sort_ = (sort_ + 1) % 5;
+    if (ImGui::Button((std::string("Sort: ") + sortNames[sort_] + "###sort").c_str())) sort_ = (sort_ + 1) % 5;
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
     ImGui::TextUnformatted(sort_ == 0 ? "top loads first, bottom wins" : "display only");
@@ -187,7 +187,7 @@ void ModMenuUi::tabControls() {
         std::string btn = controls_->button(i);
         std::string text = std::string(acts[i].label) + ":  " + (btn == "STICK_L" ? "L stick click" : btn == "STICK_R" ? "R stick click" : btn);
         if (i == 0) takeFocus();
-        if (ImGui::Button(text.c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+        if (ImGui::Button((text + "###bind").c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
             controls_->cycle(i, +1);
             controls_->save();
         }
@@ -210,7 +210,7 @@ void ModMenuUi::tabSystem() {
     for (const auto& o : SettingsModel::cpuOptions())
         if (o.mhz == mhz) label = o.label;
     takeFocus();
-    if (ImGui::Button(("CPU clock:  " + label).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) settings_->cycleCpu(+1);
+    if (ImGui::Button(("CPU clock:  " + label + "###cpu").c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) settings_->cycleCpu(+1);
     if (focusFirst_) ImGui::SetItemDefaultFocus();
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
@@ -219,7 +219,7 @@ void ModMenuUi::tabSystem() {
                        "and when the game exits. A clock manager (Horizon OC / sys-clk profile for this title) overrides this setting.");
     ImGui::PopStyleColor();
     ImGui::Spacing();
-    if (ImGui::Button(settings_->widescreen() ? "Widescreen:  16:9" : "Widescreen:  off (original 4:3)",
+    if (ImGui::Button(settings_->widescreen() ? "Widescreen:  16:9###wide" : "Widescreen:  off (original 4:3)###wide",
                       ImVec2(ImGui::GetContentRegionAvail().x, 0)))
         settings_->toggleWidescreen();
     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
@@ -356,23 +356,28 @@ void ModMenuUi::tabDebug() {
     // lists scroll inside their own panel, above the Apply row at the bottom of the window
     const float listH = ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - ImGui::GetFrameHeight() * 3 - 24.f;
     const float w = ImGui::GetContentRegionAvail().x;
-    auto toggle = [&](const char* label, bool& v) {
-        if (ImGui::Button((std::string(label) + (v ? ":  ON" : ":  off")).c_str(), ImVec2(w, 0))) v = !v;
+    // a slider the pad moves directly: Left/Right while it has the cursor (A then Left/Right also works, ImGui's own way)
+    auto slider = [&](const char* label, int& v, int lo, int hi, int step, const char* fmt) {
+        ImGui::SetNextItemWidth(w * 0.5f);
+        ImGui::SliderInt(label, &v, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp);
+        if (ImGui::IsItemFocused() && !ImGui::IsItemActive()) {
+            if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, true) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickLeft, true))
+                v = std::max(lo, (v - 1) / step * step);
+            if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, true) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, true))
+                v = std::min(hi, (v / step + 1) * step);
+        }
     };
 
     if (debugPage_ == 0) {
-        toggle("Walk through walls", d.noclip);
-        toggle("God mode (party takes no damage)", d.god);
-        char b[96];
-        snprintf(b, sizeof b, "Walk speed:  %d%s", d.speed, d.speed == 4 ? " (normal)" : "");
-        if (ImGui::Button(b, ImVec2(w, 0))) d.cycleSpeed();
-        snprintf(b, sizeof b, "Light radius:  %d", d.light);
-        if (ImGui::Button(b, ImVec2(w, 0))) d.cycleLight();
-        toggle("Keep this light radius", d.lightLock);
-        toggle("No darkness", d.fullBright);
-        if (ImGui::Button(d.heal ? "Heal party:  yes" : "Heal party:  no", ImVec2(w, 0))) d.heal = !d.heal;
+        ImGui::Checkbox("Walk through walls", &d.noclip);
+        ImGui::Checkbox("God mode (party takes no damage)", &d.god);
+        slider("Walk speed", d.speed, 1, 6, 1, d.speed == 4 ? "%d (normal)" : "%d");
+        slider("Light radius", d.light, 0, 1500, 25, "%d");
+        ImGui::Checkbox("Keep this light radius", &d.lightLock);
+        ImGui::Checkbox("No darkness", &d.fullBright);
+        ImGui::Checkbox("Heal party", &d.heal);
         ImGui::PushStyleColor(ImGuiCol_Text, kDim);
-        ImGui::TextWrapped("A changes a setting. Everything applies when you close the menu with B. The game normally changes the "
+        ImGui::TextWrapped("A ticks a box, Left/Right moves a slider. Everything applies when you close the menu with B. The game normally changes the "
                            "light radius itself (torches, events): \"Keep\" holds yours.");
         ImGui::PopStyleColor();
     } else if (debugPage_ == 1) {
@@ -393,7 +398,7 @@ void ModMenuUi::tabDebug() {
     } else {
         static const char* kinds[] = {"Items", "Weapons", "Armors"};
         static const char kindChar[] = {'i', 'w', 'a'};
-        if (ImGui::Button((std::string("Category: ") + kinds[itemKind_]).c_str())) itemKind_ = (itemKind_ + 1) % 3;
+        if (ImGui::Button((std::string("Category: ") + kinds[itemKind_] + "###cat").c_str())) itemKind_ = (itemKind_ + 1) % 3;
         ImGui::SameLine();
         ImGui::TextColored(kDim, "A adds one, X removes one");
         ImGui::BeginChild("items", ImVec2(0, listH - ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
