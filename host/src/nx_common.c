@@ -292,6 +292,10 @@ static JSValue nx_json_lazy_get(JSContext *ctx, JSValueConst self, int argc, JSV
 
 void nx_common_init(JSContext *ctx, JSValueConst nx, const char *root, NxLogFn log) {
     g_log = log;
+    for (int i = 0; i < MAX_LAZY; i++) {             /* a new game session: the previous one's lazy JSON handles are gone */
+        free(g_lazy[i].buf); free(g_lazy[i].off);
+        g_lazy[i].buf = NULL; g_lazy[i].off = NULL; g_lazy[i].len = 0; g_lazy[i].n = 0;
+    }
     JS_SetPropertyStr(ctx, nx, "log", JS_NewCFunction(ctx, nx_log, "log", 1));
     JS_SetPropertyStr(ctx, nx, "now", JS_NewCFunction(ctx, nx_now, "now", 0));
     JS_SetPropertyStr(ctx, nx, "sleep", JS_NewCFunction(ctx, nx_sleep, "sleep", 1));

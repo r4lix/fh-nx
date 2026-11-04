@@ -1688,6 +1688,9 @@ typedef struct {
 static GlyphEntry g_gcache[GCACHE];
 
 static int register_font(const char *family, const char *path) {
+    /* the table lives for the whole process and every game (re)start registers its fonts again: a known family is kept, not
+     * added once more (16 restarts used to fill the table, and the next boot waited forever for its font) */
+    for (int i = 0; i < g_nfonts; i++) if (!strcasecmp(g_fonts[i].family, family)) return 1;
     if (g_nfonts >= MAX_FONTS) return 0;
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
