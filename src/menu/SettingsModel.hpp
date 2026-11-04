@@ -8,7 +8,8 @@ class SettingsModel {
 public:
     struct CpuOption { int mhz; const char* label; };
     static const std::vector<CpuOption>& cpuOptions();     // 0 = the console's own clock
-    static constexpr int kDefaultCpuMhz = 1700;
+    static constexpr int kAutoCpu = -1;                   // step up only while the game needs it (host/src/cpu_boost.c)
+    static constexpr int kDefaultCpuMhz = kAutoCpu;
 
     explicit SettingsModel(std::string iniPath) : ini_(std::move(iniPath)) {}
     void load();

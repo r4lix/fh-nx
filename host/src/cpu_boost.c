@@ -15,6 +15,13 @@ static ClkrstSession s_sess;
 static int s_open;             /* clkrst fallback session */
 static u32 s_orig_hz;          /* clkrst fallback: what the console ran at before we touched it */
 static int s_target_mhz;       /* 0 = leave the clock alone */
+static int s_auto;             /* Auto mode: s_target_mhz follows the load */
+static int s_level;            /* Auto: index in k_levels */
+static const int k_levels[] = {0, 1224, 1428, 1581, 1785};   /* 0 = the console's own clock (1020 MHz) */
+#define N_LEVELS ((int)(sizeof k_levels / sizeof k_levels[0]))
+#define STOCK_MHZ 1020
+static double s_win_ms, s_win_n, s_win_over, s_calm_ms, s_calm_n, s_calm_peak;
+static u64 s_win_t0, s_calm_t0, s_last_change;
 static int s_in_focus = 1;
 static int s_applied;          /* an override / rate is currently set by us */
 static Mutex s_lock;
@@ -24,12 +31,14 @@ int cpu_boost_read_setting(const char *ini_path) {
     FILE *f = fopen(ini_path, "r");
     if (!f) return CPU_BOOST_DEFAULT_MHZ;
     char line[128];
-    int mhz = CPU_BOOST_DEFAULT_MHZ;
+    int mhz = CPU_BOOST_DEFAULT_MHZ, v2 = 0;
     while (fgets(line, sizeof line, f)) {
-        if (strncmp(line, "cpu_mhz=", 8) == 0) { mhz = atoi(line + 8); break; }
+        if (strncmp(line, "cpu_mhz=", 8) == 0) mhz = atoi(line + 8);
+        else if (strncmp(line, "cpu_v2=", 7) == 0) v2 = 1;
     }
     fclose(f);
-    return mhz < 0 ? 0 : mhz;
+    if (!v2 && mhz == 1700) mhz = CPU_BOOST_AUTO;     /* 1700 was the default before Auto existed (SettingsModel.cpp agrees) */
+    return mhz < 0 ? CPU_BOOST_AUTO : mhz;
 }
 
 static Result mgr_override(u32 hz) {
@@ -71,7 +80,9 @@ static void on_applet(AppletHookType hook, void *param) {
 
 void cpu_boost_init(int mhz) {
     mutexInit(&s_lock);
-    s_target_mhz = mhz;
+    s_auto = mhz == CPU_BOOST_AUTO;
+    s_level = 0;
+    s_target_mhz = s_auto ? 0 : mhz;
     Service s;
     for (int i = 0; i < 2 && !s_mgr; i++) {
         const char *nm = i == 0 ? "hoc:clk" : "sysclk:ipc";
@@ -84,7 +95,8 @@ void cpu_boost_init(int mhz) {
         }
         if (!s_open) { fh_log("cpu: no clock manager and no clkrst, clock left alone\n"); return; }
     }
-    fh_log("cpu: %s, setting %d MHz\n", s_mgr ? s_mgr : "clkrst (no clock manager running)", mhz);
+    if (s_auto) fh_log("cpu: %s, auto clock\n", s_mgr ? s_mgr : "clkrst (no clock manager running)");
+    else fh_log("cpu: %s, setting %d MHz\n", s_mgr ? s_mgr : "clkrst (no clock manager running)", mhz);
     appletHook(&s_hook, on_applet, NULL);
     mutexLock(&s_lock);
     apply_locked();
@@ -93,7 +105,9 @@ void cpu_boost_init(int mhz) {
 
 void cpu_boost_set(int mhz) {
     mutexLock(&s_lock);
-    s_target_mhz = mhz < 0 ? 0 : mhz;
+    s_auto = mhz == CPU_BOOST_AUTO;
+    if (s_auto) { s_level = 0; s_win_t0 = s_calm_t0 = 0; }
+    s_target_mhz = s_auto ? 0 : (mhz < 0 ? 0 : mhz);
     if (s_target_mhz == 0) { int f = s_in_focus; s_in_focus = 0; apply_locked(); s_in_focus = f; }
     else apply_locked();
     mutexUnlock(&s_lock);
@@ -109,3 +123,52 @@ void cpu_boost_exit(void) {
     s_mgr = NULL;
     mutexUnlock(&s_lock);
 }
+
+/* Auto clock. The game has 16.7 ms per frame. Up one step as soon as it runs short (half a second averaging over 12.5 ms of work,
+ * or 3 frames over budget); down one step only after 3 calm seconds in which the lower clock would still leave room (work scaled
+ * by the clock ratio stays under 10 ms on average and 15 ms at worst). At most one step every half second. */
+static void set_level_locked(int lv, double ms) {
+    if (lv < 0) lv = 0;
+    if (lv >= N_LEVELS) lv = N_LEVELS - 1;
+    if (lv == s_level) return;
+    fh_log("cpu auto: %d -> %d MHz (game %.1f ms/frame)\n", k_levels[s_level] ? k_levels[s_level] : STOCK_MHZ,
+           k_levels[lv] ? k_levels[lv] : STOCK_MHZ, ms);
+    s_level = lv;
+    s_target_mhz = k_levels[lv];
+    if (s_target_mhz == 0) { int f = s_in_focus; s_in_focus = 0; apply_locked(); s_in_focus = f; }
+    else apply_locked();
+}
+void cpu_boost_frame(double work_ms) {
+    if (!s_auto || (!s_mgr && !s_open)) return;
+    u64 now = armGetSystemTick(), f = armGetSystemTickFreq();
+    mutexLock(&s_lock);
+    if (!s_win_t0) { s_win_t0 = s_calm_t0 = now; s_win_ms = s_win_n = s_win_over = s_calm_ms = s_calm_n = s_calm_peak = 0; }
+    s_win_ms += work_ms; s_win_n++;
+    if (work_ms > 16.7) s_win_over++;
+    s_calm_ms += work_ms; s_calm_n++;
+    if (work_ms > s_calm_peak) s_calm_peak = work_ms;
+    int can_step = now - s_last_change > f / 2;
+    if (now - s_win_t0 > f / 2) {
+        double avg = s_win_ms / s_win_n;
+        if (can_step && s_level < N_LEVELS - 1 && (avg > 12.5 || s_win_over >= 3)) {
+            set_level_locked(s_level + 1, avg);
+            s_last_change = now;
+            s_calm_t0 = now; s_calm_ms = s_calm_n = s_calm_peak = 0;
+        }
+        s_win_t0 = now; s_win_ms = s_win_n = s_win_over = 0;
+    }
+    if (now - s_calm_t0 > 3 * f) {
+        if (s_level > 0 && can_step) {
+            double cur = k_levels[s_level], lower = k_levels[s_level - 1] ? k_levels[s_level - 1] : STOCK_MHZ, k = cur / lower;
+            double avg = s_calm_ms / s_calm_n;
+            if (avg * k < 10.0 && s_calm_peak * k < 15.0) { set_level_locked(s_level - 1, avg); s_last_change = now; }
+        }
+        s_calm_t0 = now; s_calm_ms = s_calm_n = s_calm_peak = 0;
+    }
+    mutexUnlock(&s_lock);
+}
+int cpu_boost_current_mhz(void) {
+    int on = s_target_mhz > 0 && s_in_focus && (s_mgr || s_open);
+    return on ? s_target_mhz : STOCK_MHZ;
+}
+int cpu_boost_is_auto(void) { return s_auto; }

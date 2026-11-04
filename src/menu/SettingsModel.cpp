@@ -6,7 +6,7 @@
 
 const std::vector<SettingsModel::CpuOption>& SettingsModel::cpuOptions() {
     static const std::vector<CpuOption> o = {
-        {0, "Console default"}, {1224, "1224 MHz"}, {1428, "1428 MHz"}, {1581, "1581 MHz"}, {1700, "1700 MHz"}, {1785, "1785 MHz"},
+        {-1, "Auto (only when needed)"}, {0, "Console default"}, {1224, "1224 MHz"}, {1428, "1428 MHz"}, {1581, "1581 MHz"}, {1700, "1700 MHz"}, {1785, "1785 MHz"},
     };
     return o;
 }
@@ -15,13 +15,16 @@ void SettingsModel::load() {
     cpuMhz_ = kDefaultCpuMhz;
     widescreen_ = false;
     overlay_ = false;
+    bool v2 = false;
     std::ifstream f(ini_);
     std::string line;
     while (std::getline(f, line)) {
-        if (line.rfind("cpu_mhz=", 0) == 0) cpuMhz_ = std::max(0, std::atoi(line.c_str() + 8));
+        if (line.rfind("cpu_mhz=", 0) == 0) cpuMhz_ = std::max(-1, std::atoi(line.c_str() + 8));
+        else if (line.rfind("cpu_v2=", 0) == 0) v2 = true;
         else if (line.rfind("widescreen=", 0) == 0) widescreen_ = std::atoi(line.c_str() + 11) != 0;
         else if (line.rfind("overlay=", 0) == 0) overlay_ = std::atoi(line.c_str() + 8) != 0;
     }
+    if (!v2 && cpuMhz_ == 1700) cpuMhz_ = kAutoCpu;    // 1700 was the default before Auto existed
 }
 
 bool SettingsModel::save() const {
@@ -29,8 +32,10 @@ bool SettingsModel::save() const {
     {
         std::ofstream f(tmp, std::ios::trunc);
         if (!f) return false;
-        f << "[settings]\n# CPU clock while the game has focus: 0 = console default; the clock service picks the nearest rate\n";
+        f << "[settings]\n# CPU clock while the game has focus: -1 = auto (steps up only while the game needs it), 0 = console default,\n"
+             "# else MHz (the clock service picks the nearest rate)\n";
         f << "cpu_mhz=" << cpuMhz_ << "\n";
+        f << "cpu_v2=1\n";
         f << "# 1: 16:9 game area (1110x624), read when the game starts\n";
         f << "widescreen=" << (widescreen_ ? 1 : 0) << "\n";
         f << "# 1: performance overlay (fps, frame times, memory, map)\n";

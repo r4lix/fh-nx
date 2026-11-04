@@ -214,8 +214,8 @@ void ModMenuUi::tabSystem() {
     if (focusFirst_) ImGui::SetItemDefaultFocus();
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
-    ImGui::TextWrapped("Press A to change. Applied at once and kept for the next start. The game runs its JavaScript on the CPU, so "
-                       "a higher clock gives more frames per second on busy maps. The console's own clock comes back in the HOME menu "
+    ImGui::TextWrapped("Press A to change. Applied at once and kept for the next start. Auto raises the clock only while the game needs it; "
+                       "a fixed clock gives the same speed all the time. The console's own clock comes back in the HOME menu "
                        "and when the game exits. A clock manager (Horizon OC / sys-clk profile for this title) overrides this setting.");
     ImGui::PopStyleColor();
     ImGui::Spacing();
@@ -305,9 +305,10 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
     }
     if (tabId_ == 4 && settings_) {
         ImGui::TextUnformatted("CPU clock");
-        ImGui::TextColored(kDim, "default: %d MHz", SettingsModel::kDefaultCpuMhz);
-        ImGui::TextWrapped("1700-1785 MHz is what many homebrew use; it is within the clocks the console itself offers. Higher clocks "
-                           "drain the battery faster.");
+        ImGui::TextColored(kDim, "default: Auto");
+        ImGui::TextWrapped("Auto runs at the console's own clock and steps up (1224, 1428, 1581, 1785 MHz) only while a busy map or "
+                           "battle needs it, then back down. A fixed clock is used the whole time. Higher clocks drain the battery "
+                           "faster; all of these are clocks the console itself offers.");
         ImGui::End();
         return;
     }

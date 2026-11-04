@@ -225,9 +225,11 @@ static void overlay_update(Overlay *o, JSContext *ctx, JSValueConst g, JSRuntime
 #else
     const char *eng = "QuickJS";
 #endif
-    snprintf(o->text, sizeof o->text, "%.0f fps   worst frame %.1f ms\ngame %.1f ms   screen wait %.1f ms\n%s   heap %.0f MB%s%s",
+    snprintf(o->text, sizeof o->text,
+             "%.0f fps   worst frame %.1f ms\ngame %.1f ms   screen wait %.1f ms\n%s   heap %.0f MB   cpu %d MHz%s%s%s",
              o->t0 ? o->frames / secs : 0.0, (double)o->worst * ms, (double)o->js * ms / n, (double)o->swap * ms / n, eng,
-             u.malloc_size / 1048576.0, line ? "\n" : "", line ? line : "");
+             u.malloc_size / 1048576.0, cpu_boost_current_mhz(), cpu_boost_is_auto() ? " (auto)" : "", line ? "\n" : "",
+             line ? line : "");
     if (line) JS_FreeCString(ctx, line);
     JS_FreeValue(ctx, r);
     JS_FreeValue(ctx, fn);
@@ -321,6 +323,7 @@ static int run_session(void) {
 
         if (snap_now) { menu_snapshot(); debug_menu_open(ctx, g); menu_open = 1; menu_reset_focus(); }
         u64 js_end = armGetSystemTick();
+        cpu_boost_frame((double)(js_end - a) * 1000.0 / armGetSystemTickFreq());   /* Auto clock: steps on the game's work time */
         if (!snap_now && menu_overlay_on()) {
             overlay_update(&ov, ctx, g, rt);
             menu_overlay(ov.text);
