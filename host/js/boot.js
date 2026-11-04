@@ -1096,6 +1096,18 @@
       if (dbg().god && this.isActor() && id === this.deathStateId()) return;
       return addState.apply(this, arguments);
     };
+    // hold the light settings against the game's own events (torches, cutscenes, parallel events that set it every frame):
+    // their plugin commands are rewritten while a lock is on, and the frame check below catches anything else
+    const pc = g.Game_Interpreter.prototype.pluginCommand;
+    g.Game_Interpreter.prototype.pluginCommand = function (command, args) {
+      const d = dbg(), c = String(command).toLowerCase();
+      if ((c === "light" || c === "fire") && args && args.length) {
+        if (d.lightLock && typeof d.light === "number" && (args[0] === "radius" || args[0] === "radiusgrow"))
+          args = ["radius", String(d.light)].concat(args[0] === "radius" ? args.slice(2) : []);
+        else if (d.fullBright && args[0] === "activate") return;
+      }
+      return pc.call(this, command, args);
+    };
     // hold the light settings against the game's own events (torches, cutscenes)
     const update = g.Scene_Map.prototype.update;
     g.Scene_Map.prototype.update = function () {

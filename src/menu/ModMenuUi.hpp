@@ -54,6 +54,8 @@ private:
     int tabId_ = 0;                // which tab was drawn last (0 mods, 1 controls, 2 plugins, 3 help)
     int tabStep_ = 0;
     bool focusFirst_ = true;
+    bool focusTab_ = false;        // L/R just switched tabs: the next focusable widget takes the pad cursor
+    void takeFocus();
     ModMenuModel::Plan applied_;
     bool applyFailed_ = false;
     Rects rects_;

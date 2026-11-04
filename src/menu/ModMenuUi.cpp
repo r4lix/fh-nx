@@ -49,7 +49,7 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
         ids.push_back(kHelp);
         const char* names[] = {"Mods", "Controls", "Plugins", "Help", "System", "Debug"};
         const int n = (int)ids.size();
-        if (tabStep_ != 0) tab_ = (tab_ + tabStep_ + n) % n;
+        if (tabStep_ != 0) { tab_ = (tab_ + tabStep_ + n) % n; focusTab_ = true; }
         for (int i = 0; i < n; i++) {
             ImGuiTabItemFlags f = (tabStep_ != 0 && tab_ == i) ? ImGuiTabItemFlags_SetSelected : 0;
             if (ImGui::BeginTabItem(names[ids[i]], nullptr, f)) {
@@ -65,6 +65,7 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
             }
         }
         tabStep_ = 0;
+        focusTab_ = false;
         ImGui::EndTabBar();
     }
 
@@ -90,6 +91,15 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     infoPane(ImVec2(marginX + leftW + gap, marginY), ImVec2(display.x - marginX * 2 - leftW - gap, 240.f));
     if (focusNow) focusFirst_ = false;
     return applied;
+}
+
+// Moves the pad cursor onto the widget that follows (once, after L/R switched tabs), so Up/Down then works inside the new tab
+// instead of walking the tab bar.
+void ModMenuUi::takeFocus() {
+    if (!focusTab_) return;
+    focusTab_ = false;
+    ImGui::SetKeyboardFocusHere();
+    ImGui::SetNavCursorVisible(true);
 }
 
 void ModMenuUi::planLine(const ModMenuModel::Plan& p) {
@@ -136,6 +146,7 @@ void ModMenuUi::tabMods() {
         size_t i = order[k];
         const Mod* m = model_.mod(i);
         ImGui::PushID((int)i);
+        if (k == 0) takeFocus();
         bool on = rows[i].enabled;
         if (ImGui::Checkbox("##on", &on)) model_.toggle(i);
         if (focusFirst_ && k == 0) ImGui::SetItemDefaultFocus();
@@ -175,6 +186,7 @@ void ModMenuUi::tabControls() {
         ImGui::PushID((int)i);
         std::string btn = controls_->button(i);
         std::string text = std::string(acts[i].label) + ":  " + (btn == "STICK_L" ? "L stick click" : btn == "STICK_R" ? "R stick click" : btn);
+        if (i == 0) takeFocus();
         if (ImGui::Button(text.c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
             controls_->cycle(i, +1);
             controls_->save();
@@ -197,6 +209,7 @@ void ModMenuUi::tabSystem() {
     std::string label = "Console default";
     for (const auto& o : SettingsModel::cpuOptions())
         if (o.mhz == mhz) label = o.label;
+    takeFocus();
     if (ImGui::Button(("CPU clock:  " + label).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) settings_->cycleCpu(+1);
     if (focusFirst_) ImGui::SetItemDefaultFocus();
     ImGui::Spacing();
@@ -266,6 +279,10 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
             for (int g : debug_->give) n += g;
             if (n) ImGui::BulletText("%d item%s added", n, n == 1 ? "" : "s");
             if (debug_->heal) ImGui::BulletText("party healed");
+            std::string set;
+            for (const char* k : {"noclip", "god", "speed", "light", "lightlock", "fullbright"})
+                if (pending.find(std::string(k) + " ") != std::string::npos) set += std::string(set.empty() ? "" : ", ") + k;
+            if (!set.empty()) ImGui::BulletText("cheat settings: %s", set.c_str());
         }
         ImGui::TextColored(kWarn, "Cheats are saved with the game while they are on.");
         ImGui::End();
@@ -320,9 +337,11 @@ void ModMenuUi::tabDebug() {
     static const char* pages[] = {"Cheats", "Teleport", "Items"};
     for (int i = 0; i < 3; i++) {
         if (i) ImGui::SameLine();
-        if (debugPage_ == i) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        const bool cur = debugPage_ == i;                  // the press below may change the page: pop what was pushed
+        if (cur) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (cur) takeFocus();
         if (ImGui::Button(pages[i])) debugPage_ = i;
-        if (debugPage_ == i) ImGui::PopStyleColor();
+        if (cur) ImGui::PopStyleColor();
         if (i == 0 && focusFirst_) ImGui::SetItemDefaultFocus();
     }
     ImGui::Separator();
