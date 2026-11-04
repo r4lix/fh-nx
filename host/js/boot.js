@@ -1077,6 +1077,90 @@
     };
   }
 
+  // 11c. The menu's Debug tab (testing cheats). __debugMenuState describes the game for the menu when it opens; __debugMenuApply
+  //      takes the commands staged there when it closes (formats: src/menu/DebugModel.hpp). The settings live in
+  //      $gameSystem._fhDebug, so they are saved with the game while on.
+  {
+    const dbg = () => (g.$gameSystem ? (g.$gameSystem._fhDebug = g.$gameSystem._fhDebug || {}) : {});
+    const plugin = (cmd, args) => { try { new g.Game_Interpreter().pluginCommand(cmd, args); } catch (e) { nx.log("[debug] " + cmd + " " + args.join(" ") + ": " + e); } };
+    const radius = () => { const v = g.$gameVariables && g.$gameVariables._Terrax_Lighting_Radius; return typeof v === "number" ? v : 300; };
+    const lit = () => !g.$gameVariables || !g.$gameVariables.valueScriptActive || g.$gameVariables.valueScriptActive();
+    const clean = (t) => String(t || "").replace(/[\r\n]+/g, " ").trim();
+
+    const GP = g.Game_Player.prototype, through = GP.isDebugThrough, speed = GP.realMoveSpeed;
+    GP.isDebugThrough = function () { return !!dbg().noclip || through.call(this); };
+    GP.realMoveSpeed = function () { const d = dbg(); return d.speed ? d.speed + (this.isDashing() ? 1 : 0) : speed.call(this); };
+    const GBB = g.Game_BattlerBase.prototype, setHp = GBB.setHp, addState = g.Game_Battler.prototype.addState;
+    GBB.setHp = function (hp) { if (dbg().god && this.isActor() && hp < this._hp) hp = this._hp; return setHp.call(this, hp); };
+    g.Game_Battler.prototype.addState = function (id) {
+      if (dbg().god && this.isActor() && id === this.deathStateId()) return;
+      return addState.apply(this, arguments);
+    };
+    // hold the light settings against the game's own events (torches, cutscenes)
+    const update = g.Scene_Map.prototype.update;
+    g.Scene_Map.prototype.update = function () {
+      const d = dbg();
+      if (d.lightLock && typeof d.light === "number" && radius() !== d.light) plugin("Light", ["radius", String(d.light)]);
+      if (d.fullBright && lit()) plugin("Light", ["deactivate"]);
+      return update.apply(this, arguments);
+    };
+    // a debug teleport lands on the passable tile nearest the map's centre (the map is unknown until it loads)
+    const loaded = g.Scene_Map.prototype.onMapLoaded;
+    g.Scene_Map.prototype.onMapLoaded = function () {
+      const r = loaded.apply(this, arguments);
+      const d = dbg();
+      if (d.place && g.$gameMap.mapId() === d.place) {
+        d.place = 0;
+        const W = g.$gameMap.width(), H = g.$gameMap.height(), cx = W >> 1, cy = H >> 1;
+        let best = null;
+        for (let rad = 0; rad < Math.max(W, H) && !best; rad++)
+          for (let y = cy - rad; y <= cy + rad && !best; y++)
+            for (let x = cx - rad; x <= cx + rad && !best; x++)
+              if (x >= 0 && y >= 0 && x < W && y < H && g.$gameMap.isPassable(x, y, 2) && !g.$gameMap.eventsXy(x, y).length) best = [x, y];
+        if (best) g.$gamePlayer.locate(best[0], best[1]);
+        nx.log("[debug] teleported to map " + g.$gameMap.mapId() + " at " + (best ? best.join(",") : "0,0 (no free tile)"));
+      }
+      return r;
+    };
+
+    g.__debugMenuState = function () {
+      if (!g.$dataMapInfos || !g.$dataItems || !g.$gameParty || !g.$gamePlayer) return "";
+      const d = dbg(), out = [];
+      out.push("noclip " + (d.noclip ? 1 : 0), "god " + (d.god ? 1 : 0), "speed " + (d.speed || g.$gamePlayer.moveSpeed()),
+               "light " + radius(), "lightlock " + (d.lightLock ? 1 : 0), "fullbright " + (lit() ? 0 : 1));
+      const id = g.$gameMap.mapId(), info = g.$dataMapInfos[id];
+      out.push("where " + id + " " + g.$gamePlayer.x + " " + g.$gamePlayer.y + " " + clean(info && info.name));
+      for (const m of g.$dataMapInfos) if (m && m.id) out.push("map " + m.id + " " + clean(m.name));
+      const list = (arr, k) => { for (const it of arr) if (it && clean(it.name)) out.push("item " + k + " " + it.id + " " + g.$gameParty.numItems(it) + " " + clean(it.name)); };
+      list(g.$dataItems, "i"); list(g.$dataWeapons, "w"); list(g.$dataArmors, "a");
+      return out.join("\n");
+    };
+    g.__debugMenuApply = function (text) {
+      const d = dbg();
+      for (const line of String(text).split("\n")) {
+        const a = line.trim().split(/\s+/), n = Number(a[1]);
+        switch (a[0]) {
+          case "noclip": d.noclip = !!n; break;
+          case "god": d.god = !!n; break;
+          case "speed": d.speed = n; break;
+          case "light": d.light = n; plugin("Light", ["radius", String(n)]); break;
+          case "lightlock": d.lightLock = !!n; break;
+          case "fullbright": d.fullBright = !!n; plugin("Light", [n ? "deactivate" : "activate"]); break;
+          case "heal": g.$gameParty.members().forEach((m) => m.recoverAll()); break;
+          case "give": {
+            const arr = a[1] === "w" ? g.$dataWeapons : a[1] === "a" ? g.$dataArmors : g.$dataItems, it = arr[Number(a[2])];
+            if (it) g.$gameParty.gainItem(it, Number(a[3]) || 1, false);
+            break;
+          }
+          case "teleport":
+            if (g.$dataMapInfos[n]) { d.place = n; g.$gamePlayer.reserveTransfer(n, 0, 0, 2, 0); }
+            break;
+        }
+      }
+      nx.log("[debug] applied: " + String(text).trim().replace(/\n/g, "; "));
+    };
+  }
+
   // 12. Closing a menu or ending a battle rebuilds the whole map scene: the map JSON is parsed again (~25 ms on a PC) and a new
   //     Spriteset_Map creates ~420 character sprites, tilemap, lightmask and pictures (~45 ms), ~0.5 s on the
   //     Switch. When the map scene went to a menu scene (not a battle, not a transfer) and the same map comes back

@@ -157,6 +157,40 @@ static int run_file(JSContext *ctx, const char *path) {
     return 1;
 }
 
+/* ---- the menu's Debug tab ------------------------------------------------------------------------ */
+
+/* Menu opening: ask the game (boot.js __debugMenuState) for its cheat state, map and item lists. */
+static void debug_menu_open(JSContext *ctx, JSValueConst g) {
+    const char *text = NULL;
+    JSValue f = JS_GetPropertyStr(ctx, g, "__debugMenuState");
+    JSValue r = JS_UNDEFINED;
+    if (JS_IsFunction(ctx, f)) {
+        r = JS_Call(ctx, f, JS_UNDEFINED, 0, NULL);
+        if (JS_IsException(r)) nx_dump_exception(ctx);
+        else if (JS_IsString(r)) text = JS_ToCString(ctx, r);
+    }
+    menu_set_debug_state(text ? text : "");
+    if (text) JS_FreeCString(ctx, text);
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, f);
+}
+
+/* Menu closed: hand the staged commands to the game (boot.js __debugMenuApply). */
+static void debug_menu_close(JSContext *ctx, JSValueConst g) {
+    const char *cmds = menu_debug_commands();
+    if (!cmds || !cmds[0]) return;
+    say("debug menu: %s", cmds);
+    JSValue f = JS_GetPropertyStr(ctx, g, "__debugMenuApply");
+    if (JS_IsFunction(ctx, f)) {
+        JSValue arg = JS_NewString(ctx, cmds);
+        JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 1, &arg);
+        if (JS_IsException(r)) nx_dump_exception(ctx);
+        JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, arg);
+    }
+    JS_FreeValue(ctx, f);
+}
+
 /* ---- worker ------------------------------------------------------------------------------------- */
 
 /* One run of the game: a fresh QuickJS runtime booting MV. Returns 1 when the mods menu asked for a restart (Apply),
@@ -218,6 +252,7 @@ static int run_session(void) {
                 menu_release_gl();
                 menu_open = 0;
                 g_mute = 20;                                  /* the closing press must not reach the game */
+                debug_menu_close(ctx, g);
                 JSValue f = JS_GetPropertyStr(ctx, g, "__menuClosed");
                 if (JS_IsFunction(ctx, f)) { JSValue rr = JS_Call(ctx, f, JS_UNDEFINED, 0, NULL); JS_FreeValue(ctx, rr); }
                 JS_FreeValue(ctx, f);
@@ -239,7 +274,7 @@ static int run_session(void) {
         while (JS_ExecutePendingJob(rt, &pc) > 0) {}
         t_js += armGetSystemTick() - a;
 
-        if (snap_now) { menu_snapshot(); menu_open = 1; menu_reset_focus(); }
+        if (snap_now) { menu_snapshot(); debug_menu_open(ctx, g); menu_open = 1; menu_reset_focus(); }
         u64 sw0 = armGetSystemTick();
         eglSwapBuffers(s_display, s_surface);
         t_swap += armGetSystemTick() - sw0;

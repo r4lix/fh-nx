@@ -21,6 +21,8 @@ struct Menu {
     bool ready = false;
     std::string title;
     std::unique_ptr<ModMenuUi> ui;
+    DebugModel debug;
+    std::string debugCmds;
     GLuint prog = 0, fontTex = 0, snapTex = 0, vbo = 0, ibo = 0;
     GLint locProj = -1, locTex = -1, locPos = -1, locUv = -1, locCol = -1;
     uint64_t prev = 0;
@@ -205,7 +207,7 @@ extern "C" int menu_init(const char* ttfPath, const char* title) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     if (s.settings) s.settings->onCpuChange = [](int mhz) { cpu_boost_set(mhz); };
-    g.ui = std::make_unique<ModMenuUi>(*s.model, s.controls.get(), s.settings.get());
+    g.ui = std::make_unique<ModMenuUi>(*s.model, s.controls.get(), s.settings.get(), &g.debug);
     g.title = title ? title : "Fear & Hunger";
     g.ready = true;
     return 1;
@@ -277,4 +279,10 @@ extern "C" void menu_release_gl(void) {
     if (g.locUv >= 0) glDisableVertexAttribArray(g.locUv);
     if (g.locCol >= 0) glDisableVertexAttribArray(g.locCol);
     g.prev = 0;
+}
+
+extern "C" void menu_set_debug_state(const char* text) { g.debug.setState(text ? text : ""); }
+extern "C" const char* menu_debug_commands(void) {
+    g.debugCmds = g.debug.available() ? g.debug.commands() : std::string();
+    return g.debugCmds.c_str();
 }

@@ -25,6 +25,10 @@ int menu_frame(const MenuInput *in);
 void menu_snapshot(void);
 /* Put the pad focus on the first control (call when the menu opens). */
 void menu_reset_focus(void);
+/* Debug tab: the game's state as text lines when the menu opens (see src/menu/DebugModel.hpp), and the commands staged in the
+ * tab when it closes ("" when none; valid until the next call). */
+void menu_set_debug_state(const char *text);
+const char *menu_debug_commands(void);
 /* Reset the screen state the menu changed so the game's own GL layer can carry on. */
 void menu_release_gl(void);
 

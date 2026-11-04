@@ -1,6 +1,7 @@
 #include "ModMenuUi.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <vector>
 
 namespace {
@@ -39,13 +40,14 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
     }
 
     if (ImGui::BeginTabBar("tabs")) {
-        enum { kMods, kControls, kPlugins, kHelp, kSystem };
+        enum { kMods, kControls, kPlugins, kHelp, kSystem, kDebug };
         std::vector<int> ids = {kMods};
         if (controls_) ids.push_back(kControls);
         if (settings_) ids.push_back(kSystem);
+        if (debug_ && debug_->available()) ids.push_back(kDebug);
         ids.push_back(kPlugins);
         ids.push_back(kHelp);
-        const char* names[] = {"Mods", "Controls", "Plugins", "Help", "System"};
+        const char* names[] = {"Mods", "Controls", "Plugins", "Help", "System", "Debug"};
         const int n = (int)ids.size();
         if (tabStep_ != 0) tab_ = (tab_ + tabStep_ + n) % n;
         for (int i = 0; i < n; i++) {
@@ -56,6 +58,7 @@ bool ModMenuUi::draw(const Header& header, ImVec2 display) {
                 if (ids[i] == kMods) tabMods();
                 else if (ids[i] == kControls) tabControls();
                 else if (ids[i] == kSystem) tabSystem();
+                else if (ids[i] == kDebug) tabDebug();
                 else if (ids[i] == kPlugins) tabPlugins();
                 else tabHelp();
                 ImGui::EndTabItem();
@@ -250,6 +253,24 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // read-only: the pad stays on the list
 
+    if (tabId_ == 5 && debug_) {
+        ImGui::TextUnformatted("Debug (testing)");
+        ImGui::TextColored(kDim, "Now: map %d %s, x %d y %d", debug_->whereMap, debug_->whereName.c_str(), debug_->whereX,
+                           debug_->whereY);
+        std::string pending = debug_->commands();
+        if (pending.empty()) ImGui::TextColored(kDim, "No changes. Close the menu (B) to go back to the game.");
+        else {
+            ImGui::TextUnformatted("Applied when the menu closes (B):");
+            if (debug_->teleport) ImGui::BulletText("teleport to map %d %s", debug_->teleport, debug_->mapName(debug_->teleport).c_str());
+            int n = 0;
+            for (int g : debug_->give) n += g;
+            if (n) ImGui::BulletText("%d item%s added", n, n == 1 ? "" : "s");
+            if (debug_->heal) ImGui::BulletText("party healed");
+        }
+        ImGui::TextColored(kWarn, "Cheats are saved with the game while they are on.");
+        ImGui::End();
+        return;
+    }
     if (tabId_ == 4 && settings_) {
         ImGui::TextUnformatted("CPU clock");
         ImGui::TextColored(kDim, "default: %d MHz", SettingsModel::kDefaultCpuMhz);
@@ -292,4 +313,77 @@ void ModMenuUi::infoPane(ImVec2 pos, ImVec2 size) {
         ImGui::TextColored(kWarn, "%zu shared with other enabled mods, %d won by them", ov.size(), lost);
     }
     ImGui::End();
+}
+
+void ModMenuUi::tabDebug() {
+    DebugModel& d = *debug_;
+    static const char* pages[] = {"Cheats", "Teleport", "Items"};
+    for (int i = 0; i < 3; i++) {
+        if (i) ImGui::SameLine();
+        if (debugPage_ == i) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ImGui::Button(pages[i])) debugPage_ = i;
+        if (debugPage_ == i) ImGui::PopStyleColor();
+        if (i == 0 && focusFirst_) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::Separator();
+    // lists scroll inside their own panel, above the Apply row at the bottom of the window
+    const float listH = ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - ImGui::GetFrameHeight() * 3 - 24.f;
+    const float w = ImGui::GetContentRegionAvail().x;
+    auto toggle = [&](const char* label, bool& v) {
+        if (ImGui::Button((std::string(label) + (v ? ":  ON" : ":  off")).c_str(), ImVec2(w, 0))) v = !v;
+    };
+
+    if (debugPage_ == 0) {
+        toggle("Walk through walls", d.noclip);
+        toggle("God mode (party takes no damage)", d.god);
+        char b[96];
+        snprintf(b, sizeof b, "Walk speed:  %d%s", d.speed, d.speed == 4 ? " (normal)" : "");
+        if (ImGui::Button(b, ImVec2(w, 0))) d.cycleSpeed();
+        snprintf(b, sizeof b, "Light radius:  %d", d.light);
+        if (ImGui::Button(b, ImVec2(w, 0))) d.cycleLight();
+        toggle("Keep this light radius", d.lightLock);
+        toggle("No darkness", d.fullBright);
+        if (ImGui::Button(d.heal ? "Heal party:  yes" : "Heal party:  no", ImVec2(w, 0))) d.heal = !d.heal;
+        ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+        ImGui::TextWrapped("A changes a setting. Everything applies when you close the menu with B. The game normally changes the "
+                           "light radius itself (torches, events): \"Keep\" holds yours.");
+        ImGui::PopStyleColor();
+    } else if (debugPage_ == 1) {
+        if (d.teleport) {
+            ImGui::TextColored(kWarn, "Teleport on close: %d %s", d.teleport, d.mapName(d.teleport).c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("cancel")) d.teleport = 0;
+        } else ImGui::TextColored(kDim, "A picks a map, B closes the menu and goes there");
+        ImGui::BeginChild("maps", ImVec2(0, listH - ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
+        for (const auto& m : d.maps()) {
+            char b[160];
+            snprintf(b, sizeof b, "%3d  %s", m.id, m.name.c_str());
+            ImGui::PushID(m.id);
+            if (ImGui::Selectable(b, d.teleport == m.id || (!d.teleport && m.id == d.whereMap))) d.teleport = m.id;
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    } else {
+        static const char* kinds[] = {"Items", "Weapons", "Armors"};
+        static const char kindChar[] = {'i', 'w', 'a'};
+        if (ImGui::Button((std::string("Category: ") + kinds[itemKind_]).c_str())) itemKind_ = (itemKind_ + 1) % 3;
+        ImGui::SameLine();
+        ImGui::TextColored(kDim, "A adds one, X removes one");
+        ImGui::BeginChild("items", ImVec2(0, listH - ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
+        const auto& items = d.items();
+        for (size_t i = 0; i < items.size(); i++) {
+            if (items[i].kind != kindChar[itemKind_]) continue;
+            char b[200];
+            if (d.give[i]) snprintf(b, sizeof b, "%s  (have %d, +%d)", items[i].name.c_str(), items[i].owned, d.give[i]);
+            else snprintf(b, sizeof b, "%s  (have %d)", items[i].name.c_str(), items[i].owned);
+            ImGui::PushID((int)i);
+            if (ImGui::Selectable(b, debugItem_ == i)) { debugItem_ = i; d.give[i]++; }
+            if (ImGui::IsItemFocused()) {
+                debugItem_ = i;
+                if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false) && d.give[i] > 0) d.give[i]--;
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    }
 }

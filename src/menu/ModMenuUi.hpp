@@ -1,5 +1,6 @@
 #pragma once
 #include "ControlsModel.hpp"
+#include "DebugModel.hpp"
 #include "SettingsModel.hpp"
 #include "ModMenuModel.hpp"
 #include "imgui.h"
@@ -16,8 +17,10 @@ public:
     };
 
     // `controls` (optional) adds the Controls tab; it is saved as soon as a binding changes.
-    explicit ModMenuUi(ModMenuModel& model, ControlsModel* controls = nullptr, SettingsModel* settings = nullptr)
-        : model_(model), controls_(controls), settings_(settings) {}
+    // `debug` (optional) adds the Debug tab (testing cheats) while it holds the game's state.
+    explicit ModMenuUi(ModMenuModel& model, ControlsModel* controls = nullptr, SettingsModel* settings = nullptr,
+                       DebugModel* debug = nullptr)
+        : model_(model), controls_(controls), settings_(settings), debug_(debug) {}
 
     // Call once per frame between NewFrame() and Render(). Returns true on the frame the
     // player pressed Apply; lastApplied() then holds what that cost (reload / restart).
@@ -40,6 +43,10 @@ private:
     ModMenuModel& model_;
     ControlsModel* controls_;
     SettingsModel* settings_;
+    DebugModel* debug_;
+    int debugPage_ = 0;            // 0 cheats, 1 teleport, 2 items
+    int itemKind_ = 0;             // 0 items, 1 weapons, 2 armors
+    size_t debugItem_ = 0;
     size_t selected_ = 0;
     int sort_ = 0;                 // how the mod list is shown; the load order itself never changes with it
     size_t control_ = 0;
@@ -56,6 +63,7 @@ private:
     void tabSystem();
     void tabPlugins();
     void tabHelp();
+    void tabDebug();
     void infoPane(ImVec2 pos, ImVec2 size);
     void planLine(const ModMenuModel::Plan& p);
 };
