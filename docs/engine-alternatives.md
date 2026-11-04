@@ -50,3 +50,39 @@ BurialNX, MP2's ChowJS blog, and javascript-zoo arm64 data.
    - switch-v8 is young and single-maintainer, and its GC/W^X bugs were fixed only recently;
    - GC is single-threaded, so major GCs on a 150 MB heap stall the frame;
    - the JIT works only in application/title-override mode.
+
+## Measured on the device (OLED, stock 1020 MHz, 2026-11-04)
+
+Same harness, built as NROs (build/v8spike/qjs-bench and v8-bench, switch-v8 15.0.243-9). Average tick in ms; every engine reached the
+same digest on every map.
+
+| Map | QuickJS-ng | V8 jitless | V8 full JIT | full JIT vs QuickJS |
+|---|---|---|---|---|
+| 74 Fortress | 7.98 | 7.37 | 3.93 | 2.0x |
+| 93 Level8_A | 14.83 | 12.25 | 6.02 | 2.5x |
+| 80 Back_alleys | 18.76 | 14.92 | 6.39 | 2.9x |
+| 185 The_Void2 | 14.24 | 11.34 | 5.48 | 2.6x |
+| 65 Level8_2_A | 14.68 | 12.53 | 7.08 | 2.1x |
+| 3 Level1_3_A | 12.37 | 10.70 | 5.06 | 2.4x |
+
+- Full JIT is 2.0-2.9x QuickJS on the device, below the 3x go/no-go bar (Back_alleys, the heaviest map, comes closest). Jitless is
+  only 1.1-1.3x, far from the 2x seen on PC.
+- Embedder gotcha: `Isolate::AddMessageListener` writes into the heap, so the isolate must be entered (`Isolate::Scope`) first. Without
+  it V8 reads a null current LocalHeap and Data Aborts in `WriteBarrier::GenerationalBarrierSlow` (fault address 0x8), on both jitless
+  and JIT. Node on PC does not show it.
+
+### At 1700 MHz (OLED, hoc:clk override through host/src/cpu_boost.c; `clock.ini` with `cpu_mhz=1700` in the bench dir)
+
+| Map | QuickJS-ng | V8 full JIT | full JIT vs QuickJS |
+|---|---|---|---|
+| 74 Fortress | 5.42 | 2.81 | 1.9x |
+| 93 Level8_A | 10.13 | 4.44 | 2.3x |
+| 80 Back_alleys | 12.89 | 4.67 | 2.8x |
+| 185 The_Void2 | 9.65 | 3.98 | 2.4x |
+| 65 Level8_2_A | 10.04 | 5.16 | 1.9x |
+| 3 Level1_3_A | 8.44 | 3.61 | 2.3x |
+
+- The higher clock helps both engines about equally, so the gap stays at 1.9-2.8x, still under the 3x bar.
+- Memory risk: the switch-v8 backend never gives pages back (munmap is a no-op), and the data arena it reserves varies from run to run
+  (512 MB or 1024 MB). One 1700 MHz run got 512 MB and hit a fatal OOM on the 6th map after about 30 s of play. A port would need a
+  reusing page allocator (the --hz-pool experiment) or a backend that releases memory.
