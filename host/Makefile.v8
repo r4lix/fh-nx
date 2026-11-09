@@ -16,7 +16,7 @@ $(B)/fh-nx.nro: $(B)/fh-nx.elf $(B)/fh-nx.nacp
 	$(DEVKITPRO)/tools/bin/elf2nro $< $@ --icon=icon.jpg --nacp=$(B)/fh-nx.nacp
 $(B)/fh-nx.nacp:
 	@mkdir -p $(B)
-	$(DEVKITPRO)/tools/bin/nacptool --create "Fear & Hunger" "Happy Paintings" "0.2.0-v8" $@
+	$(DEVKITPRO)/tools/bin/nacptool --create "Fear & Hunger" "Happy Paintings" "1.1.0" $@
 
 $(B)/qjs_v8.o: v8/qjs_v8.cc v8/quickjs.h v8/hz_pool.h v8/hz_platform.inc
 	@mkdir -p $(B)

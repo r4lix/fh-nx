@@ -13,6 +13,12 @@ I am **not a developer**, so the code may contain bugs, security vulnerabilities
 Use it at your own risk. I cannot guarantee support, stability, compatibility, security, or regular updates.
 
 
+## What's new in 1.1.0
+
+- **New V8 engine (JIT).** The main `fh-nx.nro` now runs the game on V8 15 with full JIT instead of QuickJS: about 1.5-2x faster script execution.
+- **Performance work.** Auto CPU clock (new default: stock clock, steps up only when frames run short), faster light-mask fills, camera-only sprite updates, a tilemap paint cache and a cheaper sort. On a Switch Lite at stock clock the big maps run 11-27% faster per frame (see `docs/perf-headroom.md`).
+- **Stability.** The game can restart without running out of memory, a hung session end no longer ignores HOME, MV errors show on screen instead of freezing, and a message appears if V8 is started from the album with too little memory (hold R).
+
 ## Install
 
 1. Download `fh-nx.zip` from the [latest release](https://github.com/r4lix/fh-nx/releases/latest) and extract it to the root of your SD card. This creates `sdmc:/switch/fh-nx/`.

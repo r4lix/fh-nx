@@ -16,7 +16,7 @@ build/fh-nx.nro: build/fh-nx.elf build/fh-nx.nacp
 	$(DEVKITPRO)/tools/bin/elf2nro $< $@ --icon=icon.jpg --nacp=build/fh-nx.nacp
 build/fh-nx.nacp:
 	@mkdir -p build
-	$(DEVKITPRO)/tools/bin/nacptool --create "Fear & Hunger (QuickJS)" "Happy Paintings" "0.1.0" $@
+	$(DEVKITPRO)/tools/bin/nacptool --create "Fear & Hunger (QuickJS)" "Happy Paintings" "1.1.0" $@
 # quickjs is compiled without warnings: it is third-party and noisy
 build/quickjs.o: $(QSRC)
 	@mkdir -p build
